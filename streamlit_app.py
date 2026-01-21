@@ -2,6 +2,20 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from scipy.stats import poisson
+import requests
+
+# Inserisci qui la chiave che hai ricevuto via email
+API_KEY = '01f1c8f2a314814b17de03eeb6c53623'
+
+def get_live_odds(sport_key):
+    url = f'https://api.the-odds-api.com/v4/sports/{sport_key}/odds/'
+    params = {
+        'api_key': API_KEY,
+        'regions': 'eu', # Per i bookmaker europei
+        'markets': 'h2h,totals', # Esiti finali e Over/Under
+    }
+    response = requests.get(url, params=params)
+    return response.json()
 
 # Configurazione Grafica
 st.set_page_config(page_title="AI Profit Engine 2026", layout="wide")

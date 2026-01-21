@@ -4,129 +4,110 @@ import numpy as np
 from scipy.stats import poisson
 import requests
 
-# Inserisci qui la chiave che hai ricevuto via email
+# --- CONFIGURAZIONE ---
 API_KEY = '01f1c8f2a314814b17de03eeb6c53623'
+st.set_page_config(page_title="AI Betting Scanner PRO", layout="wide")
 
-def get_live_odds(sport_key):
-    url = f'https://api.the-odds-api.com/v4/sports/{sport_key}/odds/'
-    params = {
-        'api_key': API_KEY,
-        'regions': 'eu', # Per i bookmaker europei
-        'markets': 'h2h,totals', # Esiti finali e Over/Under
-    }
-    response = requests.get(url, params=params)
-    return response.json()
+st.title("🤖 AI Value Bet Auto-Scanner")
+st.sidebar.header("Impostazioni Bankroll")
+bankroll = st.sidebar.number_input("Budget Totale (€)", value=3000)
 
-# Configurazione Grafica
-st.set_page_config(page_title="AI Profit Engine 2026", layout="wide")
-st.title("💰 AI Value Betting System")
-st.markdown("---")
+# Mappatura Campionati per API e per Dati Storici
+leagues_map = {
+    "Serie A": {"api": "soccer_italy_serie_a", "csv": "I1"},
+    "Serie B": {"api": "soccer_italy_serie_b", "csv": "I2"},
+    "Premier League": {"api": "soccer_uefa_champs_league", "csv": "E0"}, # Esempio Champions per test
+    "Champions League": {"api": "soccer_uefa_champs_league", "csv": "CL"}
+}
 
-# 1. SELEZIONE CAMPIONATO
-leagues = {
-    "Serie A (Italia)": "I1",
-    "Serie B (Italia)": "I2",
-    "Premier League (Inghilterra)": "E0",
-    "La Liga (Spagna)": "SP1",
-    "Bundesliga (Germania)": "D1",
-    "Ligue 1 (Francia)": "F1"
-    }
+selected_league = st.selectbox("Seleziona Campionato da Scansionare", list(leagues_map.keys()))
 
-with st.sidebar:
-    st.header("Impostazioni")
-    league_name = st.selectbox("Scegli Campionato", list(leagues.keys()))
-    bankroll = st.number_input("Budget Totale (€)", value=3000)
-    st.info("Regola: Punta solo quando il Valore è positivo.")
-
-# 2. CARICAMENTO DATI AUTOMATICO
+# --- 1. CARICAMENTO DATI STORICI (Per il Modello AI) ---
 @st.cache_data
-def load_data(code):
-    url = f"https://www.football-data.co.uk/mmz4281/2526/{code}.csv"
-    df = pd.read_csv(url)
-    return df[['HomeTeam', 'AwayTeam', 'FTHG', 'FTAG']].dropna()
+def get_historical_data(code):
+    try:
+        url = f"https://www.football-data.co.uk/mmz4281/2526/{code}.csv"
+        df = pd.read_csv(url)
+        return df[['HomeTeam', 'AwayTeam', 'FTHG', 'FTAG']].dropna()
+    except:
+        st.error("Dati storici non disponibili per questo campionato.")
+        return None
 
-try:
-    data = load_data(leagues[league_name])
-    teams = sorted(data['HomeTeam'].unique())
+# --- 2. MOTORE DI CALCOLO POISSON ---
+def calculate_poisson_probs(h_team, a_team, df):
+    avg_h = df['FTHG'].mean()
+    avg_a = df['FTAG'].mean()
     
-    col1, col2 = st.columns(2)
-    with col1:
-        h_team = st.selectbox("Casa", teams)
-    with col2:
-        a_team = st.selectbox("Trasferta", teams, index=1)
-
-    # 3. MOTORE STATISTICO
-    def get_probs(h, a, df):
-        avg_h = df['FTHG'].mean()
-        avg_a = df['FTAG'].mean()
-        
-        att_h = df.groupby('HomeTeam')['FTHG'].mean()[h] / avg_h
-        def_h = df.groupby('HomeTeam')['FTAG'].mean()[h] / avg_a
-        att_a = df.groupby('AwayTeam')['FTAG'].mean()[a] / avg_a
-        def_a = df.groupby('AwayTeam')['FTHG'].mean()[a] / avg_h
+    # Calcolo forza squadre (gestione errori se squadra nuova)
+    try:
+        att_h = df.groupby('HomeTeam')['FTHG'].mean()[h_team] / avg_h
+        def_h = df.groupby('HomeTeam')['FTAG'].mean()[h_team] / avg_a
+        att_a = df.groupby('AwayTeam')['FTAG'].mean()[a_team] / avg_a
+        def_a = df.groupby('AwayTeam')['FTHG'].mean()[a_team] / avg_h
         
         exp_h = att_h * def_a * avg_h
         exp_a = att_a * def_h * avg_a
         
-        m = np.outer(poisson.pmf(range(7), exp_h), poisson.pmf(range(7), exp_a))
+        m = np.outer(poisson.pmf(range(6), exp_h), poisson.pmf(range(6), exp_a))
+        return np.sum(np.tril(m, -1)), np.sum(np.diag(m)), np.sum(np.triu(m, 1))
+    except:
+        return 0.33, 0.33, 0.33 # Default se mancano dati
+
+# --- 3. SCANSIONE QUOTE REALI (Via API) ---
+def fetch_real_odds(sport_key):
+    url = f'https://api.the-odds-api.com/v4/sports/{sport_key}/odds/'
+    params = {'api_key': API_KEY, 'regions': 'eu', 'markets': 'h2h'}
+    res = requests.get(url, params=params)
+    return res.json()
+
+# --- 4. ESECUZIONE SCANNER ---
+hist_df = get_historical_data(leagues_map[selected_league]['csv'])
+
+if st.button("Avvia Scansione Mercati Live"):
+    with st.spinner("L'AI sta analizzando i bookmaker..."):
+        odds_data = fetch_real_odds(leagues_map[selected_league]['api'])
         
-        p1, pX, p2 = np.sum(np.tril(m, -1)), np.sum(np.diag(m)), np.sum(np.triu(m, 1))
-        p_under = m[0,0]+m[0,1]+m[0,2]+m[1,0]+m[1,1]+m[2,0]
-        return p1, pX, p2, 1-p_under, p_under
-
-    p1, pX, p2, p_over, p_under = get_probs(h_team, a_team, data)
-
-    # 4. INPUT QUOTE E CALCOLO VALORE
-    st.subheader("Inserisci Quote Bookmaker")
-    c1, c2, c3, c4, c5 = st.columns(5)
-    q1 = c1.number_input("Quota 1", 1.01, 50.0, 2.0)
-    qX = c2.number_input("Quota X", 1.01, 50.0, 3.0)
-    q2 = c3.number_input("Quota 2", 1.01, 50.0, 3.5)
-    qo = c4.number_input("Quota Over 2.5", 1.01, 10.0, 1.8)
-    qu = c5.number_input("Quota Under 2.5", 1.01, 10.0, 1.9)
-
-    # 5. RISULTATI FINALI
-    st.markdown("### Risultati Analisi")
-    res = pd.DataFrame({
-        "Esito": ["1", "X", "2", "Over 2.5", "Under 2.5"],
-        "Probabilità AI": [p1, pX, p2, p_over, p_under],
-        "Quota Bookie": [q1, qX, q2, qo, qu]
-    })
-    res["Value %"] = (res["Probabilità AI"] * res["Quota Bookie"] - 1) * 100
-    
-    def color_val(val):
-        return 'background-color: #d4edda' if val > 0 else ''
-
-    st.table(res.style.applymap(color_val, subset=['Value %']))
-
-    for i, r in res.iterrows():
-        if r["Value %"] > 0:
-            k = ((r["Probabilità AI"] * r["Quota Bookie"] - 1) / (r["Quota Bookie"] - 1)) * 0.25
-            st.success(f"🎯 VALORE TROVATO su {r['Esito']}! Punta: {max(0, bankroll*k):.2f}€")
-
-except Exception as e:
-    st.error(f"Seleziona squadre valide o attendi aggiornamento dati. Errore: {e}")
-    # --- SEZIONE DIARIO DI BORDO ---
-st.divider()
-st.header("📈 Il tuo Diario verso i 5.000€")
-
-if 'history' not in st.session_state:
-    st.session_state.history = []
-
-with st.form("registro_scommessa"):
-    c1, c2, c3 = st.columns(3)
-    partita = c1.text_input("Partita", value=f"{h_team} vs {a_team}")
-    importo = c2.number_input("Soldi Puntati (€)", min_value=0.0)
-    esito = c3.selectbox("Com'è andata?", ["In attesa", "Vinta ✅", "Persa ❌"])
-    
-    if st.form_submit_button("Salva Scommessa"):
-        st.session_state.history.append({"Partita": partita, "Puntata": importo, "Esito": esito})
-
-if st.session_state.history:
-    df_history = pd.DataFrame(st.session_state.history)
-    st.table(df_history)
-    
-    # Calcolo progresso
-    vinte = sum(d['Puntata'] for d in st.session_state.history if d['Esito'] == "Vinta ✅")
-    st.progress(min(vinte / 5000, 1.0))
-    st.write(f"Ti mancano **{5000 - vinte:.2f}€** per raggiungere l'obiettivo mensile!")
+        results = []
+        for match in odds_data:
+            h_team = match['home_team']
+            a_team = match['away_team']
+            
+            # Calcolo Probabilità AI
+            p1, pX, p2 = calculate_poisson_probs(h_team, a_team, hist_df)
+            
+            # Prendi la quota migliore tra i bookmaker
+            all_odds = match['bookmakers'][0]['markets'][0]['outcomes']
+            q1 = next(o['price'] for o in all_odds if o['name'] == h_team)
+            q2 = next(o['price'] for o in all_odds if o['name'] == a_team)
+            qX = next(o['price'] for o in all_odds if o['name'] == 'Draw')
+            
+            # Trova Valore
+            v1 = (p1 * q1) - 1
+            vX = (pX * qX) - 1
+            v2 = (p2 * q2) - 1
+            
+            results.append({
+                "Partita": f"{h_team} vs {a_team}",
+                "1": q1, "X": qX, "2": q2,
+                "Value Max": max(v1, vX, v2),
+                "Segno Consigliato": ["1", "X", "2"][np.argmax([v1, vX, v2])]
+            })
+            
+        if results:
+            res_df = pd.DataFrame(results)
+            st.write("### Opportunità Rilevate")
+            
+            def highlight_value(s):
+                return ['background-color: #90ee90' if v > 0.05 else '' for v in s]
+            
+            st.table(res_df.style.apply(highlight_value, subset=['Value Max']))
+            
+            # Suggerimento Kelly per la migliore
+            best_bet = res_df.loc[res_df['Value Max'].idxmax()]
+            if best_bet['Value Max'] > 0:
+                quota = best_bet[best_bet['Segno Consigliato']]
+                prob = best_bet['Value Max'] + 1 / quota # Ricavo prob dal value
+                stake = ((best_bet['Value Max']) / (quota - 1)) * 0.25 * bankroll
+                st.success(f"🔥 MIGLIOR GIOCATA: {best_bet['Partita']} - Segno {best_bet['Segno Consigliato']} - Punta {stake:.2f}€")
+        else:
+            st.warning("Nessuna partita trovata al momento per questo campionato.")

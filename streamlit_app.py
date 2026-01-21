@@ -6,88 +6,97 @@ import requests
 from datetime import datetime
 
 # --- CONFIGURAZIONE ---
-API_KEY = 'f93dcdc217a2d3b8a2c2a91df05a7553'
-st.set_page_config(page_title="AI Total Scanner 2026", layout="wide")
+API_KEY = '01f1c8f2a314814b17de03eeb6c53623'
+st.set_page_config(page_title="AI Pro Scanner & Diario", layout="wide")
 
-st.title("🚀 AI Multi-Market Scanner")
-bankroll = st.sidebar.number_input("Budget Totale (€)", value=3000)
+# --- INIZIALIZZAZIONE DIARIO (DATABASE TEMPORANEO) ---
+if 'diario' not in st.session_state:
+    st.session_state.diario = []
 
-leagues_map = {
-    "Serie A": "soccer_italy_serie_a",
-    "Serie B": "soccer_italy_serie_b",
-    "Champions League": "soccer_uefa_champs_league",
-    "Premier League": "soccer_england_league_1"
-}
+# --- FUNZIONI ---
+def get_poisson_probs(h_exp, a_exp):
+    m = np.outer(poisson.pmf(range(7), h_exp), poisson.pmf(range(7), a_exp))
+    return np.sum(np.tril(m, -1)), np.sum(np.diag(m)), np.sum(np.triu(m, 1)), \
+           1 - (m[0,0] + m[0,1] + m[0,2] + m[1,0] + m[1,1] + m[2,0]), \
+           (1 - poisson.pmf(0, h_exp)) * (1 - poisson.pmf(0, a_exp))
 
-selected_league = st.selectbox("Seleziona Campionato", list(leagues_map.keys()))
+def calc_stake(prob, quota, budget, frazione):
+    if quota <= 1: return 0
+    value = (prob * quota) - 1
+    if value <= 0: return 0
+    kelly = value / (quota - 1)
+    return round(budget * kelly * frazione, 2)
 
-def calculate_value(prob, quota):
-    return (prob * quota) - 1
+# --- INTERFACCIA ---
+st.title("🤖 AI Terminal & Diario Profitto")
 
-# --- SCANSIONE LIVE ---
-if st.button("Avvia Scansione Completa"):
-    # Chiediamo tutti i mercati: h2h (1X2), totals (U/O), btts (GG/NG)
-    url = f'https://api.the-odds-api.com/v4/sports/{leagues_map[selected_league]}/odds/'
-    params = {'api_key': API_KEY, 'regions': 'eu', 'markets': 'h2h', 'oddsFormat': 'decimal'}
+# Sidebar per Budget e Statistiche
+st.sidebar.header("💰 Gestione Finanziaria")
+bankroll_iniziale = st.sidebar.number_input("Budget Attuale (€)", value=3000)
+frazione_kelly = st.sidebar.slider("Rischio (Kelly)", 0.05, 0.5, 0.2)
+
+# Calcolo Statistiche Diario
+df_diario = pd.DataFrame(st.session_state.diario)
+if not df_diario.empty:
+    tot_investito = df_diario['Puntata'].sum()
+    tot_vinto = df_diario[df_diario['Esito'] == 'Vinta ✅']['Ritorno'].sum()
+    profitto_netto = tot_vinto - df_diario[df_diario['Esito'] != 'In corso ⏳']['Puntata'].sum()
     
-    with st.spinner("Analizzando i mercati in tempo reale..."):
-        try:
-            response = requests.get(url, params=params)
-            data = response.json()
-        except:
-            st.error("Errore di connessione con l'API.")
-            data = []
+    st.sidebar.metric("Profitto Netto", f"{profitto_netto:.2f}€", delta=f"{profitto_netto:.2f}€")
+    st.sidebar.progress(min(max(tot_vinto / 5000, 0.0), 1.0), text=f"Progresso Obiettivo 5000€")
+
+# --- SEZIONE SCANNER ---
+tab1, tab2 = st.tabs(["🔍 Scanner Mercati", "📖 Diario Giocate"])
+
+with tab1:
+    leagues = {"Serie A": "soccer_italy_serie_a", "Serie B": "soccer_italy_serie_b", "Champions": "soccer_uefa_champs_league"}
+    sel_league = st.selectbox("Campionato", list(leagues.keys()))
+    
+    if st.button("Avvia Scansione"):
+        url = f'https://api.the-odds-api.com/v4/sports/{leagues[sel_league]}/odds/'
+        params = {'api_key': API_KEY, 'regions': 'eu', 'markets': 'h2h,totals', 'oddsFormat': 'decimal'}
+        data = requests.get(url, params=params).json()
         
-        if not data or 'error' in str(data):
-            st.warning("Nessun dato disponibile o limite API raggiunto.")
-        else:
-            final_list = []
-            for match in data:
-                # 1. Gestione Sicura Data e Ora
-                commence_time = match.get('commence_time', "")
-                if commence_time:
-                    date_obj = datetime.fromisoformat(commence_time.replace('Z', '+00:00'))
-                    data_ora = date_obj.strftime("%d/%m %H:%M")
-                else:
-                    data_ora = "N/D"
-                
-                home = match['home_team']
-                away = match['away_team']
-                
-                # Inizializziamo le variabili per le quote
-                q1, qX, q2 = 1.0, 1.0, 1.0
-                q_over, q_under = 1.0, 1.0
-                q_gg, q_ng = 1.0, 1.0
-                
-                # 2. Estrazione Quote dai vari mercati
-                if match.get('bookmakers'):
-                    markets = match['bookmakers'][0].get('markets', [])
-                    for m in markets:
-                        if m['key'] == 'h2h':
-                            q1 = next((o['price'] for o in m['outcomes'] if o['name'] == home), 1.0)
-                            q2 = next((o['price'] for o in m['outcomes'] if o['name'] == away), 1.0)
-                            qX = next((o['price'] for o in m['outcomes'] if o['name'] == 'Draw'), 1.0)
-                        elif m['key'] == 'totals':
-                            q_over = next((o['price'] for o in m['outcomes'] if o['name'] == 'Over'), 1.0)
-                            q_under = next((o['price'] for o in m['outcomes'] if o['name'] == 'Under'), 1.0)
-                        elif m['key'] == 'btts':
-                            q_gg = next((o['price'] for o in m['outcomes'] if o['name'] == 'Yes'), 1.0)
-                            q_ng = next((o['price'] for o in m['outcomes'] if o['name'] == 'No'), 1.0)
-
-                # 3. Calcolo Valore (Esempio con probabilità fisse per test stabilità)
-                # In produzione qui riattiveremo il motore Poisson
-                v1 = calculate_value(0.40, q1)
-                v_over = calculate_value(0.52, q_over)
-                v_gg = calculate_value(0.50, q_gg)
-
-                final_list.append({
-                    "Orario": data_ora,
-                    "Partita": f"{home} - {away}",
-                    "1X2": f"1:{q1} | X:{qX} | 2:{q2}",
-                    "U/O 2.5": f"U:{q_under} | O:{q_over}",
-                    "GG/NG": f"GG:{q_gg} | NG:{q_ng}",
-                    "Value Migliore": f"{max(v1, v_over, v_gg)*100:.1f}%"
-                })
+        results = []
+        for match in data:
+            # Estrazione quote semplificata
+            q1 = match['bookmakers'][0]['markets'][0]['outcomes'][0]['price'] if match.get('bookmakers') else 1.0
+            p1, pX, p2, pO, pGG = get_poisson_probs(1.6, 1.2)
+            stake = calc_stake(p1, q1, bankroll_iniziale, frazione_kelly)
             
-            df_res = pd.DataFrame(final_list)
-            st.table(df_res)
+            results.append({
+                "Match": f"{match['home_team']} - {match['away_team']}",
+                "Quota 1": q1,
+                "Consiglio": f"Punta {stake}€" if stake > 0 else "No Value",
+                "Azione": stake # Usato per il form sotto
+            })
+        st.table(results)
+
+# --- SEZIONE DIARIO ---
+with tab2:
+    st.subheader("Registra una nuova scommessa")
+    with st.form("add_bet"):
+        c1, c2, c3, c4 = st.columns(4)
+        m_name = c1.text_input("Partita")
+        m_stake = c2.number_input("Importo (€)", min_value=0.0)
+        m_quote = c3.number_input("Quota", min_value=1.0)
+        m_status = c4.selectbox("Esito", ["In corso ⏳", "Vinta ✅", "Persa ❌"])
+        
+        if st.form_submit_button("Salva nel Diario"):
+            ritorno = m_stake * m_quote if m_status == "Vinta ✅" else 0
+            st.session_state.diario.append({
+                "Data": datetime.now().strftime("%d/%m %H:%M"),
+                "Match": m_name,
+                "Puntata": m_stake,
+                "Quota": m_quote,
+                "Esito": m_status,
+                "Ritorno": ritorno
+            })
+            st.rerun()
+
+    if not df_diario.empty:
+        st.write("### Storico Giocate")
+        st.dataframe(df_diario, use_container_width=True)
+        if st.button("Cancella Diario"):
+            st.session_state.diario = []
+            st.rerun()

@@ -11,6 +11,7 @@ st.markdown("---")
 # 1. SELEZIONE CAMPIONATO
 leagues = {
     "Serie A (Italia)": "I1",
+    "Serie B (Italia)": "I2",
     "Premier League (Inghilterra)": "E0",
     "La Liga (Spagna)": "SP1",
     "Bundesliga (Germania)": "D1",

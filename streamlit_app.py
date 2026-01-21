@@ -35,8 +35,27 @@ def get_historical_data(code):
 
 # --- 2. MOTORE DI CALCOLO POISSON ---
 def calculate_poisson_probs(h_team, a_team, df):
-    avg_h = df['FTHG'].mean()
-    avg_a = df['FTAG'].mean()
+    # Protezione: se df è vuoto o None, usa medie standard
+    if df is None or df.empty:
+        exp_h = 1.5  # Media gol casa standard
+        exp_a = 1.2  # Media gol trasferta standard
+    else:
+        try:
+            avg_h = df['FTHG'].mean()
+            avg_a = df['FTAG'].mean()
+            
+            att_h = df.groupby('HomeTeam')['FTHG'].mean().get(h_team, 1.0) / avg_h
+            def_h = df.groupby('HomeTeam')['FTAG'].mean().get(h_team, 1.0) / avg_a
+            att_a = df.groupby('AwayTeam')['FTAG'].mean().get(a_team, 1.0) / avg_a
+            def_a = df.groupby('AwayTeam')['FTHG'].mean().get(a_team, 1.0) / avg_h
+            
+            exp_h = att_h * def_a * avg_h
+            exp_a = att_a * def_h * avg_a
+        except:
+            exp_h, exp_a = 1.5, 1.2
+
+    m = np.outer(poisson.pmf(range(6), exp_h), poisson.pmf(range(6), exp_a))
+    return np.sum(np.tril(m, -1)), np.sum(np.diag(m)), np.sum(np.triu(m, 1))
     
     # Calcolo forza squadre (gestione errori se squadra nuova)
     try:

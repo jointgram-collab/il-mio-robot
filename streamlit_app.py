@@ -15,6 +15,7 @@ leagues = {
     "La Liga (Spagna)": "SP1",
     "Bundesliga (Germania)": "D1",
     "Ligue 1 (Francia)": "F1"
+    "Champions League": "CL"
 }
 
 with st.sidebar:

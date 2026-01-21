@@ -21,56 +21,73 @@ leagues_map = {
 
 selected_league = st.selectbox("Seleziona Campionato", list(leagues_map.keys()))
 
-# --- FUNZIONE CALCOLO PROBABILITÀ ---
-def get_ai_predictions():
-    # Simuliamo il motore Poisson ottimizzato per evitare errori di caricamento dati
-    # In un sistema reale, qui integreresti i dati storici puliti
-    return {
-        "prob_1": 0.45, "prob_X": 0.25, "prob_2": 0.30,
-        "prob_over": 0.55, "prob_under": 0.45,
-        "prob_gg": 0.52, "prob_ng": 0.48
-    }
+def calculate_value(prob, quota):
+    return (prob * quota) - 1
 
 # --- SCANSIONE LIVE ---
 if st.button("Avvia Scansione Completa"):
+    # Chiediamo tutti i mercati: h2h (1X2), totals (U/O), btts (GG/NG)
     url = f'https://api.the-odds-api.com/v4/sports/{leagues_map[selected_league]}/odds/'
     params = {'api_key': API_KEY, 'regions': 'eu', 'markets': 'h2h,totals,btts', 'oddsFormat': 'decimal'}
     
-    with st.spinner("Analizzando tutti i mercati..."):
-        data = requests.get(url, params=params).json()
+    with st.spinner("Analizzando i mercati in tempo reale..."):
+        try:
+            response = requests.get(url, params=params)
+            data = response.json()
+        except:
+            st.error("Errore di connessione con l'API.")
+            data = []
         
-        if not data:
-            st.error("Nessun dato trovato. Controlla se il campionato è attivo.")
+        if not data or 'error' in str(data):
+            st.warning("Nessun dato disponibile o limite API raggiunto.")
         else:
             final_list = []
             for match in data:
-                # Gestione Data e Ora
-                date_obj = datetime.fromisoformat(match['commence_time'].replace('Z', '+00:00'))
-                data_ora = date_obj.strftime("%d/%m %H:%M")
+                # 1. Gestione Sicura Data e Ora
+                commence_time = match.get('commence_time', "")
+                if commence_time:
+                    date_obj = datetime.fromisoformat(commence_time.replace('Z', '+00:00'))
+                    data_ora = date_obj.strftime("%d/%m %H:%M")
+                else:
+                    data_ora = "N/D"
                 
-                # Calcolo Probabilità AI (Esempio bilanciato per evitare errori)
-                p = get_ai_predictions()
+                home = match['home_team']
+                away = match['away_team']
                 
-                # Estrazione Quote (Cerchiamo il primo bookmaker disponibile)
-                try:
-                    bookie = match['bookmakers'][0]
-                    m_1x2 = next(m for m in bookie['markets'] if m['key'] == 'h2h')['outcomes']
-                    q1 = next(o['price'] for o in m_1x2 if o['name'] == match['home_team'])
-                    q2 = next(o['price'] for o in m_1x2 if o['name'] == match['away_team'])
-                    qX = next(o['price'] for o in m_1x2 if o['name'] == 'Draw')
-                    
-                    # Aggiunta dati alla lista
-                    final_list.append({
-                        "Data/Ora": data_ora,
-                        "Partita": f"{match['home_team']} - {match['away_team']}",
-                        "1X2 (Value)": f"1:{q1} | X:{qX} | 2:{q2}",
-                        "O/U 2.5": "O:1.90 | U:1.85", # Esempio dinamico
-                        "GG/NG": "GG:1.75 | NG:2.00",
-                        "Best Value": f"{(p['prob_1']*q1-1)*100:.1f}%"
-                    })
-                except:
-                    continue
-            
-            st.table(pd.DataFrame(final_list))
+                # Inizializziamo le variabili per le quote
+                q1, qX, q2 = 1.0, 1.0, 1.0
+                q_over, q_under = 1.0, 1.0
+                q_gg, q_ng = 1.0, 1.0
+                
+                # 2. Estrazione Quote dai vari mercati
+                if match.get('bookmakers'):
+                    markets = match['bookmakers'][0].get('markets', [])
+                    for m in markets:
+                        if m['key'] == 'h2h':
+                            q1 = next((o['price'] for o in m['outcomes'] if o['name'] == home), 1.0)
+                            q2 = next((o['price'] for o in m['outcomes'] if o['name'] == away), 1.0)
+                            qX = next((o['price'] for o in m['outcomes'] if o['name'] == 'Draw'), 1.0)
+                        elif m['key'] == 'totals':
+                            q_over = next((o['price'] for o in m['outcomes'] if o['name'] == 'Over'), 1.0)
+                            q_under = next((o['price'] for o in m['outcomes'] if o['name'] == 'Under'), 1.0)
+                        elif m['key'] == 'btts':
+                            q_gg = next((o['price'] for o in m['outcomes'] if o['name'] == 'Yes'), 1.0)
+                            q_ng = next((o['price'] for o in m['outcomes'] if o['name'] == 'No'), 1.0)
 
-st.info("Nota: Le probabilità Over/Under e GG/NG sono calcolate sui trend attuali della stagione 2025/26.")
+                # 3. Calcolo Valore (Esempio con probabilità fisse per test stabilità)
+                # In produzione qui riattiveremo il motore Poisson
+                v1 = calculate_value(0.40, q1)
+                v_over = calculate_value(0.52, q_over)
+                v_gg = calculate_value(0.50, q_gg)
+
+                final_list.append({
+                    "Orario": data_ora,
+                    "Partita": f"{home} - {away}",
+                    "1X2": f"1:{q1} | X:{qX} | 2:{q2}",
+                    "U/O 2.5": f"U:{q_under} | O:{q_over}",
+                    "GG/NG": f"GG:{q_gg} | NG:{q_ng}",
+                    "Value Migliore": f"{max(v1, v_over, v_gg)*100:.1f}%"
+                })
+            
+            df_res = pd.DataFrame(final_list)
+            st.table(df_res)

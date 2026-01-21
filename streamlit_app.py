@@ -91,3 +91,27 @@ try:
 
 except Exception as e:
     st.error(f"Seleziona squadre valide o attendi aggiornamento dati. Errore: {e}")
+    # --- SEZIONE DIARIO DI BORDO ---
+st.divider()
+st.header("📈 Il tuo Diario verso i 5.000€")
+
+if 'history' not in st.session_state:
+    st.session_state.history = []
+
+with st.form("registro_scommessa"):
+    c1, c2, c3 = st.columns(3)
+    partita = c1.text_input("Partita", value=f"{h_team} vs {a_team}")
+    importo = c2.number_input("Soldi Puntati (€)", min_value=0.0)
+    esito = c3.selectbox("Com'è andata?", ["In attesa", "Vinta ✅", "Persa ❌"])
+    
+    if st.form_submit_button("Salva Scommessa"):
+        st.session_state.history.append({"Partita": partita, "Puntata": importo, "Esito": esito})
+
+if st.session_state.history:
+    df_history = pd.DataFrame(st.session_state.history)
+    st.table(df_history)
+    
+    # Calcolo progresso
+    vinte = sum(d['Puntata'] for d in st.session_state.history if d['Esito'] == "Vinta ✅")
+    st.progress(min(vinte / 5000, 1.0))
+    st.write(f"Ti mancano **{5000 - vinte:.2f}€** per raggiungere l'obiettivo mensile!")

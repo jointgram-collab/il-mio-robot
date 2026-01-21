@@ -6,7 +6,7 @@ import requests
 from datetime import datetime
 
 # --- CONFIGURAZIONE ---
-API_KEY = '01f1c8f2a314814b17de03eeb6c53623'
+API_KEY = 'f93dcdc217a2d3b8a2c2a91df05a7553'
 st.set_page_config(page_title="AI Total Scanner 2026", layout="wide")
 
 st.title("🚀 AI Multi-Market Scanner")
@@ -28,7 +28,7 @@ def calculate_value(prob, quota):
 if st.button("Avvia Scansione Completa"):
     # Chiediamo tutti i mercati: h2h (1X2), totals (U/O), btts (GG/NG)
     url = f'https://api.the-odds-api.com/v4/sports/{leagues_map[selected_league]}/odds/'
-    params = {'api_key': API_KEY, 'regions': 'eu', 'markets': 'h2h,totals,btts', 'oddsFormat': 'decimal'}
+    params = {'api_key': API_KEY, 'regions': 'eu', 'markets': 'h2h', 'oddsFormat': 'decimal'}
     
     with st.spinner("Analizzando i mercati in tempo reale..."):
         try:

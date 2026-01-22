@@ -57,7 +57,9 @@ with tab1:
         try:
             response = requests.get(url, params=params)
             data = response.json()
-            if response.status_code == 200 and data:
+            if response.status_code != 200:
+                st.error(f"Codice Errore: {response.status_code} - Messaggio: {response.text}")
+                return # Ferma l'esecuzione per non consumare altri crediti
                 st.success(f"Scansione completata! Crediti rimasti: {response.headers.get('x-requests-remaining')}")
                 found = False
                 for m in data:

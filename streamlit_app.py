@@ -57,61 +57,60 @@ with tab1:
     sel_league = st.selectbox("Seleziona Competizione", list(leagues_map.keys()))
     if st.button("AVVIA RICERCA"):
         API_KEY = '01f1c8f2a314814b17de03eeb6c53623'
+        # Chiediamo solo H2H inizialmente per evitare l'errore 422
         url = f'https://api.the-odds-api.com/v4/sports/{leagues_map[sel_league]}/odds/'
-        params = {'api_key': API_KEY, 'regions': 'eu', 'markets': 'h2h,totals,btts', 'oddsFormat': 'decimal'}
+        params = {
+            'api_key': API_KEY, 
+            'regions': 'eu', 
+            'markets': 'h2h', # Solo il mercato principale per stabilità
+            'oddsFormat': 'decimal'
+        }
         
         try:
             res = requests.get(url, params=params)
-            if res.status_code != 200:
-                st.error(f"Errore API {res.status_code}: Controlla crediti o chiave.")
+            if res.status_code == 422:
+                st.error("Errore 422: Questo campionato non ha mercati attivi in questo momento. Prova Premier League o Serie A.")
+            elif res.status_code != 200:
+                st.error(f"Errore API {res.status_code}")
             else:
                 data = res.json()
                 if not data:
-                    st.warning("Nessuna partita quotata trovata per questo campionato al momento.")
+                    st.warning("Nessuna partita trovata.")
                 else:
-                    st.success(f"Dati Ricevuti! Crediti rimasti: {res.headers.get('x-requests-remaining')}")
+                    st.success(f"Dati Ricevuti! Crediti: {res.headers.get('x-requests-remaining')}")
                     found = False
                     for m in data:
                         home, away = m['home_team'], m['away_team']
                         if not m.get('bookmakers'): continue
                         bk = m['bookmakers'][0]
                         
-                        q1, qX, q2, qO, qGG = 1.0, 1.0, 1.0, 1.0, 1.0
-                        for mk in bk['markets']:
-                            if mk['key'] == 'h2h':
-                                q1 = next((o['price'] for o in mk['outcomes'] if o['name'] == home), 1.0)
-                                q2 = next((o['price'] for o in mk['outcomes'] if o['name'] == away), 1.0)
-                                qX = next((o['price'] for o in mk['outcomes'] if o['name'] == 'Draw'), 1.0)
-                            elif mk['key'] == 'totals':
-                                qO = next((o['price'] for o in mk['outcomes'] if o['name'] == 'Over'), 1.0)
-                            elif mk['key'] == 'btts':
-                                qGG = next((o['price'] for o in mk['outcomes'] if o['name'] == 'Yes'), 1.0)
+                        # Estraiamo la quota 1X2 in sicurezza
+                        mk_h2h = next((mk for mk in bk['markets'] if mk['key'] == 'h2h'), None)
+                        if not mk_h2h: continue
+                        
+                        q1 = next((o['price'] for o in mk_h2h['outcomes'] if o['name'] == home), 1.0)
+                        q2 = next((o['price'] for o in mk_h2h['outcomes'] if o['name'] == away), 1.0)
+                        qX = next((o['price'] for o in mk_h2h['outcomes'] if o['name'] == 'Draw'), 1.0)
 
+                        # Per i test usiamo Poisson su 1X2
                         p1, pX, p2, pO, pGG = get_poisson_probs(1.65, 1.25)
+                        
+                        # Cerchiamo valore sui 3 segni principali
                         opzioni = [
                             {"tipo": "1", "q": q1, "v": (p1*q1)-1, "p": p1},
                             {"tipo": "X", "q": qX, "v": (pX*qX)-1, "p": pX},
-                            {"tipo": "2", "q": q2, "v": (p2*q2)-1, "p": p2},
-                            {"tipo": "OVER 2.5", "q": qO, "v": (pO*qO)-1, "p": pO},
-                            {"tipo": "GOAL", "q": qGG, "v": (pGG*qGG)-1, "p": pGG}
+                            {"tipo": "2", "q": q2, "v": (p2*q2)-1, "p": p2}
                         ]
                         best = max(opzioni, key=lambda x: x['v'])
                         
                         if best['v'] > soglia_valore:
                             found = True
                             stake = calc_stake(best['p'], best['q'], bankroll, frazione_kelly)
-                            with st.container():
-                                c1, c2, c3 = st.columns([3, 2, 1])
-                                c1.write(f"⚽ **{home}-{away}**\n\n*Book: {bk['title']}*")
-                                c2.info(f"🎯 **{best['tipo']}** @ {best['q']}\n\nValue: {round(best['v']*100,1)}%")
-                                if c3.button("REGISTRA", key=f"btn_{home}_{best['tipo']}"):
-                                    st.session_state.diario.append({
-                                        "Match": f"{home}-{away}", "Giocata": best['tipo'], 
-                                        "Quota": best['q'], "Stake": stake, "Esito": "IN CORSO", "Ritorno": 0
-                                    })
-                                    st.toast("Salvato!")
-                    if not found: st.info("Nessuna opportunità con i criteri selezionati.")
-        except Exception as e: st.error(f"Errore: {e}")
+                            col_a, col_b = st.columns([3, 1])
+                            col_a.write(f"⚽ **{home}-{away}** | {best['tipo']} @ {best['q']} (Val: {round(best['v']*100,1)}%)")
+                            if col_b.button("REGISTRA", key=f"btn_{home}_{best['tipo']}"):
+                                st.session_state.diario.append({"Match": f"{home}-{away}", "Giocata": best['tipo'], "Quota": best['q'], "Stake": stake, "Esito": "IN CORSO"})
+                                st.rerun()
 
 with tab2:
     if st.session_state.diario:

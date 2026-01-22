@@ -19,7 +19,7 @@ leagues_map = {
     "🇮🇹 Serie B": "soccer_italy_serie_b",
     "🇪🇺 Champions League": "soccer_uefa_champs_league",
     "🇪🇺 Europa League": "soccer_uefa_europa_league",
-    "🏴󠁧󠁢󠁥󠁮󠁧󠁿 Premier League": "soccer_england_league_1",
+    "🏴󠁧󠁢󠁥󠁮󠁧 Premier League": "soccer_england_league_1",
     "🏴󠁧󠁢󠁥󠁮󠁧󠁿 Championship (UK 2)": "soccer_england_league_2",
     "🏴󠁧󠁢󠁥󠁮󠁧󠁿 League One (UK 3)": "soccer_england_league_3",
     "🇫🇷 Ligue 1": "soccer_france_ligue_1",

@@ -56,52 +56,55 @@ with tab1:
                 st.success(f"Dati Ricevuti! Crediti: {res.headers.get('x-requests-remaining')}")
                 found = False
                 for m in data:
-                    home, away = m['home_team'], m['away_team']
-                    if not m.get('bookmakers'): continue
-                    
-                    bk = m['bookmakers'][0] # Prende il primo bookmaker disponibile
-                    bk_name = bk['title']
-                    
-                    mk_h2h = next((mk for mk in bk['markets'] if mk['key'] == 'h2h'), None)
-                    if not mk_h2h: continue
-                    
-                    q1 = next((o['price'] for o in mk_h2h['outcomes'] if o['name'] == home), 1.0)
-                    q2 = next((o['price'] for o in mk_h2h['outcomes'] if o['name'] == away), 1.0)
-                    qX = next((o['price'] for o in mk_h2h['outcomes'] if o['name'] == 'Draw'), 1.0)
+                        home, away = m['home_team'], m['away_team']
+                        if not m.get('bookmakers'): continue
+                        
+                        bk = m['bookmakers'][0]
+                        bk_name = bk['title']
+                        
+                        # Estrazione quote 1X2
+                        mk_h2h = next((mk for mk in bk['markets'] if mk['key'] == 'h2h'), None)
+                        if not mk_h2h: continue
+                        
+                        q1 = next((o['price'] for o in mk_h2h['outcomes'] if o['name'] == home), 1.0)
+                        q2 = next((o['price'] for o in mk_h2h['outcomes'] if o['name'] == away), 1.0)
+                        qX = next((o['price'] for o in mk_h2h['outcomes'] if o['name'] == 'Draw'), 1.0)
 
-                    p1, pX, p2 = get_poisson_probs(1.65, 1.25)
-                    opzioni = [
-                        {"tipo": "1", "q": q1, "v": (p1*q1)-1, "p": p1},
-                        {"tipo": "X", "q": qX, "v": (pX*qX)-1, "p": pX},
-                        {"tipo": "2", "q": q2, "v": (p2*q2)-1, "p": p2}
-                    ]
-                    best = max(opzioni, key=lambda x: x['v'])
-                    
-                    if best['v'] > soglia_valore:
-                        found = True
-                        stake = calc_stake(best['p'], best['q'], bankroll, frazione_kelly)
-                        with st.container():
-                            c1, c2, c3 = st.columns([3, 2, 1])
-                            c1.markdown(f"⚽ **{home} vs {away}** \n*Bookmaker: {bk_name}*")
-                            c2.warning(f"🎯 **SEGNO {best['tipo']}** @ {best['q']}  \n💰 Stake: **{stake}€** (Val: {round(best['v']*100,1)}%)")
+                        # Calcolo Valore (Poisson fisso per test)
+                        p1, pX, p2 = get_poisson_probs(1.65, 1.25)
+                        opzioni = [
+                            {"tipo": "1", "q": q1, "v": (p1*q1)-1, "p": p1},
+                            {"tipo": "X", "q": qX, "v": (pX*qX)-1, "p": pX},
+                            {"tipo": "2", "q": q2, "v": (p2*q2)-1, "p": p2}
+                        ]
+                        best = max(opzioni, key=lambda x: x['v'])
+                        
+                        if best['v'] > soglia_valore:
+                            found = True
+                            stake = calc_stake(best['p'], best['q'], bankroll, frazione_kelly)
                             
-                            # Logica di registrazione corretta
-                            if c3.button("REGISTRA", key=f"reg_{home}_{best['tipo']}"):
-                                st.session_state.diario.append({
-                                    "Data": datetime.now().strftime("%d/%m %H:%M"),
-                                    "Match": f"{home}-{away}",
-                                    "Giocata": best['tipo'],
-                                    "Quota": best['q'],
-                                    "Stake": stake,
-                                    "Bookmaker": bk_name,
-                                    "Esito": "IN CORSO",
-                                    "Ritorno": 0.0
-                                })
-                                st.toast(f"Registrato: {home}!")
-                                st.rerun()
-                if not found: st.info("Nessuna scommessa di valore trovata con i filtri attuali.")
-            else: st.error("Errore API.")
-        except Exception as e: st.error(f"Errore: {e}")
+                            # INTERFACCIA VISIVA (Come nel tuo screenshot)
+                            with st.container():
+                                c1, c2, c3 = st.columns([3, 2, 1])
+                                c1.markdown(f"⚽ **{home} vs {away}** \n*Bookmaker: {bk_name}*")
+                                c2.warning(f"🎯 **SEGNO {best['tipo']}** @ {best['q']} \n💰 Stake: **{stake}€** (Val: {round(best['v']*100,1)}%)")
+                                
+                                # IL FIX: ID pulsante univoco usando nome squadra e tipo scommessa
+                                button_id = f"reg_{home.replace(' ', '')}_{best['tipo']}"
+                                if c3.button("REGISTRA", key=button_id):
+                                    nuova_giocata = {
+                                        "Data": datetime.now().strftime("%d/%m %H:%M"),
+                                        "Match": f"{home}-{away}",
+                                        "Giocata": best['tipo'],
+                                        "Quota": best['q'],
+                                        "Stake": stake,
+                                        "Bookmaker": bk_name,
+                                        "Esito": "IN CORSO",
+                                        "Ritorno": 0.0
+                                    }
+                                    st.session_state.diario.append(nuova_giocata)
+                                    st.success(f"✅ Salvata: {home}")
+                                    st.rerun() # Forza l'aggiornamento per mostrare i dati nel diario
 
 with tab2:
     if st.session_state.diario:

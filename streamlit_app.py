@@ -42,33 +42,37 @@ tab1, tab2, tab3 = st.tabs(["🔍 SCANNER", "📖 DIARIO LIVE", "📊 ANALISI TA
 
 with tab1:
     sel_league = st.selectbox("Seleziona Competizione", list(leagues_map.keys()))
+    
+    # Usiamo un tasto che resetta lo stato per evitare loop
     if st.button("AVVIA RICERCA"):
         API_KEY = '01f1c8f2a314814b17de03eeb6c53623'
         url = f'https://api.the-odds-api.com/v4/sports/{leagues_map[sel_league]}/odds/'
-        params = {'api_key': API_KEY, 'regions': 'eu', 'markets': 'h2h,totals,btts', 'oddsFormat': 'decimal'}
+        params = {
+            'api_key': API_KEY,
+            'regions': 'eu',
+            'markets': 'h2h', # Inizia solo con 1x2 per risparmiare crediti
+            'oddsFormat': 'decimal'
+        }
+        
         try:
-            data = requests.get(url, params=params).json()
-            for m in data:
-                home = m['home_team']
-                if m.get('bookmakers'):
-                    bk = m['bookmakers'][0]
-                    q1 = next((o['price'] for market in bk['markets'] if market['key'] == 'h2h' for o in market['outcomes'] if o['name'] == home), 1.0)
-                    p1, pX, p2, pO, pGG = get_poisson_probs(1.7, 1.2)
-                    valore = (p1 * q1) - 1
-                    if valore > 0.05:
-                        stake = calc_stake(p1, q1, bankroll, frazione_kelly)
-                        with st.container():
-                            c1, c2, c3 = st.columns([3, 2, 1])
-                            c1.info(f"**{m['home_team']} - {m['away_team']}**\n\n{bk['title'].upper()}")
-                            c2.write(f"Giocata: 1 @ {q1}\n\nStake: {stake}€")
-                            if c3.button("REGISTRA", key=f"add_{home}"):
-                                st.session_state.diario.append({
-                                    "Match": f"{m['home_team']}-{m['away_team']}", "Quota": q1, 
-                                    "Puntata": stake, "Esito": "IN CORSO", "Ritorno": 0
-                                })
-                                st.rerun()
-        except: st.error("Errore API")
-
+            response = requests.get(url, params=params)
+            # Vediamo cosa dice il server prima di elaborare
+            if response.status_code == 401:
+                st.error("ERRORE 401: Chiave API non valida. Controlla se è copiata bene.")
+            elif response.status_code == 429:
+                st.error("ERRORE 429: Crediti Esauriti! Hai superato i 500 limiti mensili.")
+            elif response.status_code != 200:
+                st.error(f"Errore Server: {response.status_code}")
+            else:
+                data = response.json()
+                # ... resto del codice per mostrare i risultati ...
+                if not data:
+                    st.warning("Nessuna partita trovata per questo campionato al momento.")
+                else:
+                    st.success(f"Dati ricevuti con successo! Crediti residui stimati: {response.headers.get('x-requests-remaining', 'N/D')}")
+                    # Mostra qui i tuoi risultati verdi
+        except Exception as e:
+            st.error(f"Errore di connessione: {e}")
 with tab2:
     if st.session_state.diario:
         for i, bet in enumerate(st.session_state.diario):

@@ -1,11 +1,10 @@
 import streamlit as st
-import pandas as pd
+import pd
 import requests
 from datetime import datetime
 
-st.set_page_config(page_title="AI SNIPER - Totals & Dates", layout="wide")
+st.set_page_config(page_title="AI SNIPER - Stake Fix", layout="wide")
 
-# --- FUNZIONI TECNICHE ---
 def get_totals_value(q_over, q_under):
     margin = (1/q_over) + (1/q_under)
     return (1/q_over) / margin, (1/q_under) / margin
@@ -13,22 +12,22 @@ def get_totals_value(q_over, q_under):
 def calc_stake(prob, quota, budget, frazione):
     valore = (prob * quota) - 1
     if valore <= 0: return 2.0
+    # Aumentiamo la sensibilità dell'importo
     importo = budget * (valore / (quota - 1)) * frazione
     return round(max(2.0, min(importo, budget * 0.1)), 2)
 
-# --- INTERFACCIA ---
-st.title("⚽ AI SNIPER - Scanner Totals 2.5")
+st.title("⚽ AI SNIPER - Scanner Under/Over 2.5")
 
 st.sidebar.header("Gestione Cassa")
 budget = st.sidebar.number_input("Budget Totale (€)", value=1000.0, step=50.0)
-rischio = st.sidebar.slider("Aggressività (Kelly)", 0.05, 0.30, 0.15)
-soglia = st.sidebar.slider("Filtro Valore Minimo (%)", 0.0, 10.0, 2.0) / 100
+# Aumentato il range per permetterti di vedere importi più alti
+rischio = st.sidebar.slider("Aggressività (Kelly)", 0.10, 0.50, 0.20)
+soglia = st.sidebar.slider("Filtro Valore Minimo (%)", 0.0, 10.0, 1.0) / 100
 
 leagues = {
-    "ITALIA: Serie A": "soccer_italy_serie_a", "ITALIA: Serie B": "soccer_italy_serie_b",
-    "UK: Premier League": "soccer_england_league_1", "UK: Championship": "soccer_england_league_2",
+    "ITALIA: Serie A": "soccer_italy_serie_a", "UK: Premier League": "soccer_england_league_1",
     "SPAGNA: La Liga": "soccer_spain_la_liga", "GERMANIA: Bundesliga": "soccer_germany_bundesliga",
-    "EUROPA: Europa League": "soccer_uefa_europa_league", "OLANDA: Eredivisie": "soccer_netherlands_eredivisie"
+    "OLANDA: Eredivisie": "soccer_netherlands_eredivisie"
 }
 
 sel_league = st.selectbox("Campionato:", list(leagues.keys()))
@@ -45,12 +44,10 @@ if st.button("AVVIA SCANSIONE"):
         
         for m in data:
             home, away = m['home_team'], m['away_team']
-            # Formattazione Data
             raw_date = datetime.strptime(m['commence_time'], "%Y-%m-%dT%H:%M:%SZ")
             formatted_date = raw_date.strftime("%d/%m %H:%M")
             
             if not m.get('bookmakers'): continue
-            
             bk = m['bookmakers'][0]
             mk = next((x for x in bk['markets'] if x['key'] == 'totals'), None)
             if not mk: continue
@@ -61,10 +58,10 @@ if st.button("AVVIA SCANSIONE"):
             if q_over and q_under:
                 p_ov_e, p_un_e = get_totals_value(q_over, q_under)
                 
-                # Modello statistico (Edge 6%)
+                # Usiamo un Edge del 7% per dare più "spinta" al calcolo
                 opzioni = [
-                    {"Tipo": "OVER 2.5", "Quota": q_over, "Prob": p_ov_e + 0.06},
-                    {"Tipo": "UNDER 2.5", "Quota": q_under, "Prob": p_un_e + 0.06}
+                    {"Tipo": "OVER 2.5", "Quota": q_over, "Prob": p_ov_e + 0.07},
+                    {"Tipo": "UNDER 2.5", "Quota": q_under, "Prob": p_un_e + 0.07}
                 ]
                 
                 best = max(opzioni, key=lambda x: (x['Prob'] * x['Quota']) - 1)
@@ -85,15 +82,9 @@ if st.button("AVVIA SCANSIONE"):
         if results:
             df = pd.DataFrame(results).sort_values(by="Valore %", ascending=False)
             st.success(f"Trovate {len(results)} opportunità.")
-            
-            # Tabella ordinata per Data e Valore
             st.dataframe(df, use_container_width=True)
-            
-            # Segnale Grafico Rapido
-            top = results[0]
-            st.warning(f"🚀 **PROSSIMO MATCH DI VALORE:** {top['Data']} | {top['Match']} -> **{top['Esito']}**")
         else:
-            st.info("Nessuna partita trovata con questi parametri.")
+            st.info("Nessuna partita trovata. Prova ad aumentare l'Aggressività nella sidebar.")
             
     except Exception as e:
         st.error(f"Errore: {e}")

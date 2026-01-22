@@ -4,7 +4,7 @@ import requests
 from datetime import datetime
 
 # --- CONFIGURAZIONE PAGINA ---
-st.set_page_config(page_title="AI SNIPER - Totals & Stake Fix", layout="wide")
+st.set_page_config(page_title="AI SNIPER - Totals & API Credits", layout="wide")
 
 # --- FUNZIONI TECNICHE ---
 def get_totals_value(q_over, q_under):
@@ -14,9 +14,7 @@ def get_totals_value(q_over, q_under):
 def calc_stake(prob, quota, budget, frazione):
     valore = (prob * quota) - 1
     if valore <= 0: return 2.0
-    # Formula di Kelly: calcola la percentuale del bankroll da puntare
     importo = budget * (valore / (quota - 1)) * frazione
-    # Ritorna l'importo calcolato, con un minimo di 2€ e un massimo del 10% del budget
     return round(max(2.0, min(importo, budget * 0.1)), 2)
 
 # --- INTERFACCIA ---
@@ -24,7 +22,6 @@ st.title("⚽ AI SNIPER - Scanner Under/Over 2.5")
 
 st.sidebar.header("Gestione Cassa")
 budget = st.sidebar.number_input("Budget Totale (€)", value=1000.0, step=50.0)
-# Aumentata la sensibilità dello slider per sbloccare gli importi
 rischio = st.sidebar.slider("Aggressività (Kelly)", 0.10, 0.50, 0.25)
 soglia = st.sidebar.slider("Filtro Valore Minimo (%)", 0.0, 10.0, 1.0) / 100
 
@@ -45,12 +42,15 @@ if st.button("AVVIA SCANSIONE"):
     try:
         res = requests.get(url, params=params)
         if res.status_code == 200:
+            # --- RECUPERO CREDITI DAI HEADERS ---
+            remaining_requests = res.headers.get('x-requests-remaining', 'N/D')
+            used_requests = res.headers.get('x-requests-used', 'N/D')
+            
             data = res.json()
             results = []
             
             for m in data:
                 home, away = m['home_team'], m['away_team']
-                # Gestione orario
                 raw_date = datetime.strptime(m['commence_time'], "%Y-%m-%dT%H:%M:%SZ")
                 formatted_date = raw_date.strftime("%d/%m %H:%M")
                 
@@ -65,7 +65,6 @@ if st.button("AVVIA SCANSIONE"):
                 if q_over and q_under:
                     p_ov_e, p_un_e = get_totals_value(q_over, q_under)
                     
-                    # Edge statistico aumentato al 7% per generare segnali più forti
                     opzioni = [
                         {"Tipo": "OVER 2.5", "Quota": q_over, "Prob": p_ov_e + 0.07},
                         {"Tipo": "UNDER 2.5", "Quota": q_under, "Prob": p_un_e + 0.07}
@@ -88,10 +87,11 @@ if st.button("AVVIA SCANSIONE"):
             
             if results:
                 df = pd.DataFrame(results).sort_values(by="Valore %", ascending=False)
-                st.success(f"Analisi completata! Trovate {len(results)} opportunità.")
+                # --- MESSAGGIO CON CREDITI RESIDUI ---
+                st.success(f"✅ Analisi completata! | Crediti API Residui: **{remaining_requests}**")
                 st.dataframe(df, use_container_width=True)
             else:
-                st.info("Nessuna partita trovata. Prova ad aumentare l'Aggressività o abbassare il Filtro Valore.")
+                st.info(f"Nessuna partita trovata. (Crediti Residui: {remaining_requests})")
         else:
             st.error(f"Errore API: {res.status_code}")
             

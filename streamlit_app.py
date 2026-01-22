@@ -23,12 +23,11 @@ def calc_stake(prob, quota, budget, frazione):
     if quota <= 1.05: return 0
     val = (prob * quota) - 1
     if val <= 0: return 0
-    # Formula di Kelly: Budget * (Vantaggio / (Quota - 1)) * Frazione di rischio
     stake_suggerito = budget * (val / (quota - 1)) * frazione
-    return round(max(2.0, stake_suggerito), 2) # Minimo 2€ come per legge
+    return round(max(2.0, stake_suggerito), 2)
 
 # --- SIDEBAR ---
-st.sidebar.title("IMPOSTAZIONI TARGET")
+st.sidebar.title("TARGET 5000 EURO")
 bankroll = st.sidebar.number_input("Budget Attuale (€)", value=1000.0, step=50.0)
 frazione_kelly = st.sidebar.slider("Rischio (Kelly)", 0.05, 0.5, 0.15)
 soglia_valore = st.sidebar.slider("Filtro Valore (Minimo %)", 0.0, 10.0, 1.0) / 100
@@ -56,88 +55,77 @@ with tab1:
                 st.success(f"Dati Ricevuti! Crediti: {res.headers.get('x-requests-remaining')}")
                 found = False
                 for m in data:
-                        home, away = m['home_team'], m['away_team']
-                        if not m.get('bookmakers'): continue
-                        
-                        bk = m['bookmakers'][0]
-                        bk_name = bk['title']
-                        
-                        # Estrazione quote 1X2
-                        mk_h2h = next((mk for mk in bk['markets'] if mk['key'] == 'h2h'), None)
-                        if not mk_h2h: continue
-                        
-                        q1 = next((o['price'] for o in mk_h2h['outcomes'] if o['name'] == home), 1.0)
-                        q2 = next((o['price'] for o in mk_h2h['outcomes'] if o['name'] == away), 1.0)
-                        qX = next((o['price'] for o in mk_h2h['outcomes'] if o['name'] == 'Draw'), 1.0)
+                    home, away = m['home_team'], m['away_team']
+                    if not m.get('bookmakers'): continue
+                    
+                    bk = m['bookmakers'][0]
+                    bk_name = bk['title']
+                    mk_h2h = next((mk for mk in bk['markets'] if mk['key'] == 'h2h'), None)
+                    if not mk_h2h: continue
+                    
+                    q1 = next((o['price'] for o in mk_h2h['outcomes'] if o['name'] == home), 1.0)
+                    q2 = next((o['price'] for o in mk_h2h['outcomes'] if o['name'] == away), 1.0)
+                    qX = next((o['price'] for o in mk_h2h['outcomes'] if o['name'] == 'Draw'), 1.0)
 
-                        # Calcolo Valore (Poisson fisso per test)
-                        p1, pX, p2 = get_poisson_probs(1.65, 1.25)
-                        opzioni = [
-                            {"tipo": "1", "q": q1, "v": (p1*q1)-1, "p": p1},
-                            {"tipo": "X", "q": qX, "v": (pX*qX)-1, "p": pX},
-                            {"tipo": "2", "q": q2, "v": (p2*q2)-1, "p": p2}
-                        ]
-                        best = max(opzioni, key=lambda x: x['v'])
-                        
-                        if best['v'] > soglia_valore:
-                            found = True
-                            stake = calc_stake(best['p'], best['q'], bankroll, frazione_kelly)
+                    p1, pX, p2 = get_poisson_probs(1.65, 1.25)
+                    opzioni = [
+                        {"tipo": "1", "q": q1, "v": (p1*q1)-1, "p": p1},
+                        {"tipo": "X", "q": qX, "v": (pX*qX)-1, "p": pX},
+                        {"tipo": "2", "q": q2, "v": (p2*q2)-1, "p": p2}
+                    ]
+                    best = max(opzioni, key=lambda x: x['v'])
+                    
+                    if best['v'] > soglia_valore:
+                        found = True
+                        stake = calc_stake(best['p'], best['q'], bankroll, frazione_kelly)
+                        with st.container():
+                            c1, c2, c3 = st.columns([3, 2, 1])
+                            c1.markdown(f"⚽ **{home} vs {away}** \n*Bookmaker: {bk_name}*")
+                            c2.warning(f"🎯 **SEGNO {best['tipo']}** @ {best['q']}  \n💰 Stake: **{stake}€**")
                             
-                            # INTERFACCIA VISIVA (Come nel tuo screenshot)
-                            with st.container():
-                                c1, c2, c3 = st.columns([3, 2, 1])
-                                c1.markdown(f"⚽ **{home} vs {away}** \n*Bookmaker: {bk_name}*")
-                                c2.warning(f"🎯 **SEGNO {best['tipo']}** @ {best['q']} \n💰 Stake: **{stake}€** (Val: {round(best['v']*100,1)}%)")
-                                
-                                # IL FIX: ID pulsante univoco usando nome squadra e tipo scommessa
-                                button_id = f"reg_{home.replace(' ', '')}_{best['tipo']}"
-                                if c3.button("REGISTRA", key=button_id):
-                                    nuova_giocata = {
-                                        "Data": datetime.now().strftime("%d/%m %H:%M"),
-                                        "Match": f"{home}-{away}",
-                                        "Giocata": best['tipo'],
-                                        "Quota": best['q'],
-                                        "Stake": stake,
-                                        "Bookmaker": bk_name,
-                                        "Esito": "IN CORSO",
-                                        "Ritorno": 0.0
-                                    }
-                                    st.session_state.diario.append(nuova_giocata)
-                                    st.success(f"✅ Salvata: {home}")
-                                    st.rerun() # Forza l'aggiornamento per mostrare i dati nel diario
+                            # ID Unico per ogni pulsante registra
+                            btn_key = f"reg_{home}_{best['tipo']}_{sel_league}".replace(" ", "")
+                            if c3.button("REGISTRA", key=btn_key):
+                                st.session_state.diario.append({
+                                    "Data": datetime.now().strftime("%d/%m %H:%M"),
+                                    "Match": f"{home}-{away}",
+                                    "Giocata": best['tipo'],
+                                    "Quota": best['q'],
+                                    "Stake": stake,
+                                    "Bookmaker": bk_name,
+                                    "Esito": "IN CORSO",
+                                    "Ritorno": 0.0
+                                })
+                                st.rerun()
+                if not found: st.info("Nessuna scommessa di valore trovata.")
+            else:
+                st.error(f"Errore API {res.status_code}")
+        except Exception as e:
+            st.error(f"Errore tecnico: {e}")
 
 with tab2:
     if st.session_state.diario:
         for i, b in enumerate(st.session_state.diario):
-            with st.expander(f"📌 {b['Match']} - {b['Giocata']} @ {b['Quota']}"):
-                st.write(f"Bookmaker: {b['Bookmaker']} | Puntata: {b['Stake']}€")
+            with st.expander(f"📌 {b['Match']} - {b['Giocata']} ({b['Esito']})"):
                 c1, c2, c3 = st.columns(3)
-                nuovo = c1.selectbox("Cambia Esito", ["IN CORSO", "VINTO", "PERSO"], key=f"sel_{i}")
-                if c2.button("AGGIORNA", key=f"upd_{i}"):
+                nuovo = c1.selectbox("Esito", ["IN CORSO", "VINTO", "PERSO"], key=f"sel_{i}")
+                if c2.button("SALVA", key=f"upd_{i}"):
                     st.session_state.diario[i]['Esito'] = nuovo
                     st.session_state.diario[i]['Ritorno'] = b['Stake'] * b['Quota'] if nuovo == "VINTO" else 0.0
                     st.rerun()
                 if c3.button("ELIMINA", key=f"del_{i}"):
                     st.session_state.diario.pop(i)
                     st.rerun()
-    else: st.info("Il tuo diario è vuoto. Registra una giocata dallo Scanner!")
+    else: st.info("Diario vuoto.")
 
 with tab3:
     if st.session_state.diario:
         df = pd.DataFrame(st.session_state.diario)
         conclusi = df[df['Esito'] != 'IN CORSO']
-        giocato = conclusi['Stake'].sum()
-        vinto = conclusi['Ritorno'].sum()
-        netto = vinto - giocato
-        
-        st.header("📊 Performance Scalata")
-        c1, c2 = st.columns(2)
-        c1.metric("Profitto Netto", f"{netto:.2f}€", delta=f"{netto:.2f}€")
-        c2.metric("Target Rimanente", f"{5000 - (bankroll + netto):.2f}€")
-        
-        st.subheader("Storico Giocate")
-        st.table(df[["Data", "Match", "Giocata", "Quota", "Stake", "Esito"]])
-        
-        if st.button("SVUOTA DIARIO (RESET TEST)"):
+        netto = conclusi['Ritorno'].sum() - conclusi['Stake'].sum()
+        st.header("📊 Analisi Target")
+        st.metric("Profitto Netto Attuale", f"{netto:.2f}€")
+        st.dataframe(df)
+        if st.button("RESET DIARIO"):
             st.session_state.diario = []
             st.rerun()

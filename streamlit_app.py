@@ -34,11 +34,15 @@ frazione_kelly = st.sidebar.slider("Rischio (Kelly)", 0.05, 0.5, 0.15)
 soglia_valore = st.sidebar.slider("Filtro Valore (Minimo %)", 0.0, 10.0, 1.0) / 100
 
 leagues_map = {
-    "ITALIA: Serie A": "soccer_italy_serie_a", "ITALIA: Serie B": "soccer_italy_serie_b",
-    "EUROPA: Champions": "soccer_uefa_champs_league", "EUROPA: Europa League": "soccer_uefa_europa_league",
-    "UK: Premier League": "soccer_england_league_1", "UK: Championship": "soccer_england_league_2",
-    "UK: League One": "soccer_england_league_3", "GERMANIA: Bundesliga": "soccer_germany_bundesliga",
-    "SPAGNA: La Liga": "soccer_spain_la_liga", "FRANCIA: Ligue 1": "soccer_france_ligue_1"
+    "ITALIA: Serie A": "soccer_italy_serie_a", 
+    "ITALIA: Serie B": "soccer_italy_serie_b",
+    "EUROPA: Champions": "soccer_uefa_champs_league", 
+    "EUROPA: Europa League": "soccer_uefa_europa_league",
+    "UK: Premier League": "soccer_england_league_1", 
+    "UK: Championship": "soccer_england_league_2",
+    "GERMANIA: Bundesliga": "soccer_germany_bundesliga",
+    "SPAGNA: La Liga": "soccer_spain_la_liga", 
+    "FRANCIA: Ligue 1": "soccer_france_ligue_1"
 }
 
 tab1, tab2, tab3 = st.tabs(["🔍 SCANNER VALORE", "📖 DIARIO LIVE", "📊 ANALISI TARGET"])
@@ -61,7 +65,6 @@ with tab1:
                     if not m.get('bookmakers'): continue
                     bk = m['bookmakers'][0]
                     
-                    # Estrazione quote
                     q1, qX, q2, qO, qGG = 1.0, 1.0, 1.0, 1.0, 1.0
                     for mk in bk['markets']:
                         if mk['key'] == 'h2h':
@@ -73,7 +76,6 @@ with tab1:
                         elif mk['key'] == 'btts':
                             qGG = next((o['price'] for o in mk['outcomes'] if o['name'] == 'Yes'), 1.0)
 
-                    # Probabilità Modello Poisson
                     p1, pX, p2, pO, pGG = get_poisson_probs(1.65, 1.25)
                     
                     opzioni = [
@@ -81,3 +83,60 @@ with tab1:
                         {"tipo": "X", "q": qX, "v": (pX*qX)-1, "p": pX},
                         {"tipo": "2", "q": q2, "v": (p2*q2)-1, "p": p2},
                         {"tipo": "OVER 2.5", "q": qO, "v": (pO*qO)-1, "p": pO},
+                        {"tipo": "GOAL", "q": qGG, "v": (pGG*qGG)-1, "p": pGG}
+                    ]
+                    
+                    best = max(opzioni, key=lambda x: x['v'])
+                    
+                    if best['v'] > soglia_valore:
+                        found = True
+                        stake = calc_stake(best['p'], best['q'], bankroll, frazione_kelly)
+                        with st.container():
+                            c1, c2, c3 = st.columns([3, 2, 1])
+                            c1.markdown(f"⚽ **{home} - {away}**")
+                            c1.caption(f"Bookmaker: {bk['title']}")
+                            c2.markdown(f"🎯 `{best['tipo']}` @ **{best['q']}**")
+                            c2.caption(f"Value: +{round(best['v']*100, 1)}% | Stake: {stake}€")
+                            if c3.button("REGISTRA", key=f"add_{home}_{best['tipo']}"):
+                                st.session_state.diario.append({
+                                    "Data": datetime.now().strftime("%d/%m"), 
+                                    "Match": f"{home}-{away}",
+                                    "Giocata": best['tipo'], 
+                                    "Quota": best['q'], 
+                                    "Puntata": stake,
+                                    "Esito": "IN CORSO", 
+                                    "Ritorno": 0
+                                })
+                                st.rerun()
+                if not found: st.info("Nessuna scommessa trovata con la soglia attuale.")
+            else: st.error("Errore dati API.")
+        except Exception as e: st.error(f"Errore: {e}")
+
+with tab2:
+    if st.session_state.diario:
+        for i, bet in enumerate(st.session_state.diario):
+            with st.expander(f"{bet['Match']} - {bet['Giocata']} ({bet['Esito']})"):
+                c1, c2, c3 = st.columns(3)
+                nuovo = c1.selectbox("Esito", ["IN CORSO", "VINTO", "PERSO"], key=f"e_{i}")
+                if c2.button("SALVA", key=f"s_{i}"):
+                    st.session_state.diario[i]['Esito'] = nuovo
+                    st.session_state.diario[i]['Ritorno'] = bet['Puntata'] * bet['Quota'] if nuovo == "VINTO" else 0
+                    st.rerun()
+                if c3.button("ELIMINA", key=f"d_{i}"):
+                    st.session_state.diario.pop(i)
+                    st.rerun()
+    else: st.info("Diario vuoto.")
+
+with tab3:
+    if st.session_state.diario:
+        df = pd.DataFrame(st.session_state.diario)
+        investito = df['Puntata'].sum()
+        ritorno = df['Ritorno'].sum()
+        netto = ritorno - investito
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Giocato Totale", f"{investito:.2f}€")
+        c2.metric("Vinto Totale", f"{ritorno:.2f}€")
+        c3.metric("P/L NETTO", f"{netto:.2f}€", delta=f"{netto:.2f}€")
+        if st.button("RESET TOTALE DIARIO"):
+            st.session_state.diario = []
+            st.rerun()

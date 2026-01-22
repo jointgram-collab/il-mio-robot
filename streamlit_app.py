@@ -1,8 +1,9 @@
 import streamlit as st
 import pandas as pd
 import requests
+from datetime import datetime
 
-st.set_page_config(page_title="AI SNIPER - Under/Over & Stake", layout="wide")
+st.set_page_config(page_title="AI SNIPER - Totals & Dates", layout="wide")
 
 # --- FUNZIONI TECNICHE ---
 def get_totals_value(q_over, q_under):
@@ -10,15 +11,13 @@ def get_totals_value(q_over, q_under):
     return (1/q_over) / margin, (1/q_under) / margin
 
 def calc_stake(prob, quota, budget, frazione):
-    # Formula di Kelly per determinare l'importo ottimale
     valore = (prob * quota) - 1
     if valore <= 0: return 2.0
     importo = budget * (valore / (quota - 1)) * frazione
-    # Limite massimo 10% del budget per prudenza
     return round(max(2.0, min(importo, budget * 0.1)), 2)
 
 # --- INTERFACCIA ---
-st.title("⚽ AI SNIPER - Scanner Under/Over 2.5")
+st.title("⚽ AI SNIPER - Scanner Totals 2.5")
 
 st.sidebar.header("Gestione Cassa")
 budget = st.sidebar.number_input("Budget Totale (€)", value=1000.0, step=50.0)
@@ -34,7 +33,7 @@ leagues = {
 
 sel_league = st.selectbox("Campionato:", list(leagues.keys()))
 
-if st.button("AVVIA SCANSIONE UNDER/OVER"):
+if st.button("AVVIA SCANSIONE"):
     API_KEY = '01f1c8f2a314814b17de03eeb6c53623'
     url = f'https://api.the-odds-api.com/v4/sports/{leagues[sel_league]}/odds/'
     params = {'api_key': API_KEY, 'regions': 'eu', 'markets': 'totals', 'oddsFormat': 'decimal'}
@@ -46,6 +45,10 @@ if st.button("AVVIA SCANSIONE UNDER/OVER"):
         
         for m in data:
             home, away = m['home_team'], m['away_team']
+            # Formattazione Data
+            raw_date = datetime.strptime(m['commence_time'], "%Y-%m-%dT%H:%M:%SZ")
+            formatted_date = raw_date.strftime("%d/%m %H:%M")
+            
             if not m.get('bookmakers'): continue
             
             bk = m['bookmakers'][0]
@@ -58,7 +61,7 @@ if st.button("AVVIA SCANSIONE UNDER/OVER"):
             if q_over and q_under:
                 p_ov_e, p_un_e = get_totals_value(q_over, q_under)
                 
-                # Simuliamo un edge del 6% per trovare valore
+                # Modello statistico (Edge 6%)
                 opzioni = [
                     {"Tipo": "OVER 2.5", "Quota": q_over, "Prob": p_ov_e + 0.06},
                     {"Tipo": "UNDER 2.5", "Quota": q_under, "Prob": p_un_e + 0.06}
@@ -70,6 +73,7 @@ if st.button("AVVIA SCANSIONE UNDER/OVER"):
                 if valore_perc > soglia:
                     stake_calcolato = calc_stake(best['Prob'], best['Quota'], budget, rischio)
                     results.append({
+                        "Data": formatted_date,
                         "Match": f"{home} - {away}",
                         "Bookmaker": bk['title'],
                         "Esito": best['Tipo'],
@@ -80,16 +84,16 @@ if st.button("AVVIA SCANSIONE UNDER/OVER"):
         
         if results:
             df = pd.DataFrame(results).sort_values(by="Valore %", ascending=False)
-            st.success(f"Analisi completata. Trovate {len(results)} opportunità.")
+            st.success(f"Trovate {len(results)} opportunità.")
             
-            # Tabella con gli importi bene in vista
-            st.table(df)
+            # Tabella ordinata per Data e Valore
+            st.dataframe(df, use_container_width=True)
             
-            # Segnale Grafico per la "Bet del Giorno"
+            # Segnale Grafico Rapido
             top = results[0]
-            st.info(f"🏆 **TOP PICK:** {top['Match']} -> **{top['Esito']}** @ {top['Quota']} | Scommetti: **{top['Importo (€)']}€**")
+            st.warning(f"🚀 **PROSSIMO MATCH DI VALORE:** {top['Data']} | {top['Match']} -> **{top['Esito']}**")
         else:
-            st.warning("Nessun segnale trovato. Prova ad abbassare il Filtro Valore.")
+            st.info("Nessuna partita trovata con questi parametri.")
             
     except Exception as e:
         st.error(f"Errore: {e}")

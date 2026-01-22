@@ -7,28 +7,28 @@ from datetime import datetime
 
 # --- CONFIGURAZIONE ---
 API_KEY = '01f1c8f2a314814b17de03eeb6c53623'
-st.set_page_config(page_title="AI Sniper Global - Obiettivo 5000€", layout="wide")
+st.set_page_config(page_title="AI Sniper Global", layout="wide")
 
-st.title("🎯 AI Sniper Global Scanner")
-bankroll = st.sidebar.number_input("Capitale Operativo (€)", value=1000)
+st.title("AI Sniper Global Scanner")
+bankroll = st.sidebar.number_input("Capitale Operativo (Euro)", value=1000)
 frazione_kelly = st.sidebar.slider("Livello Rischio (Kelly)", 0.05, 0.5, 0.2)
 
 # --- MAPPA CAMPIONATI ESTESA ---
 leagues_map = {
-    "🇮🇹 Serie A": "soccer_italy_serie_a",
-    "🇮🇹 Serie B": "soccer_italy_serie_b",
-    "🇪🇺 Champions League": "soccer_uefa_champs_league",
-    "🇪🇺 Europa League": "soccer_uefa_europa_league",
-    "🏴󠁧󠁢󠁥󠁮󠁧 Premier League": "soccer_england_league_1",
-    "🏴󠁧󠁢󠁥󠁮󠁧󠁿 Championship (UK 2)": "soccer_england_league_2",
-    "🏴󠁧󠁢󠁥󠁮󠁧󠁿 League One (UK 3)": "soccer_england_league_3",
-    "🇫🇷 Ligue 1": "soccer_france_ligue_1",
-    "🇫🇷 Ligue 2": "soccer_france_ligue_2",
-    "🇩🇪 Bundesliga": "soccer_germany_bundesliga",
-    "🇩🇪 Bundesliga 2": "soccer_germany_bundesliga_2",
-    "🇪🇸 La Liga": "soccer_spain_la_liga",
-    "🇪🇸 La Liga 2": "soccer_spain_segunda_division",
-    "🇳🇱 Eredivisie": "soccer_netherlands_eredivisie"
+    "ITALIA Serie A": "soccer_italy_serie_a",
+    "ITALIA Serie B": "soccer_italy_serie_b",
+    "EUROPA Champions League": "soccer_uefa_champs_league",
+    "EUROPA Europa League": "soccer_uefa_europa_league",
+    "UK Premier League": "soccer_england_league_1",
+    "UK Championship": "soccer_england_league_2",
+    "UK League One": "soccer_england_league_3",
+    "FRANCIA Ligue 1": "soccer_france_ligue_1",
+    "FRANCIA Ligue 2": "soccer_france_ligue_2",
+    "GERMANIA Bundesliga": "soccer_germany_bundesliga",
+    "GERMANIA Bundesliga 2": "soccer_germany_bundesliga_2",
+    "SPAGNA La Liga": "soccer_spain_la_liga",
+    "SPAGNA La Liga 2": "soccer_spain_segunda_division",
+    "OLANDA Eredivisie": "soccer_netherlands_eredivisie"
 }
 
 selected_label = st.selectbox("Seleziona Competizione", list(leagues_map.keys()))
@@ -52,7 +52,7 @@ def calc_stake(prob, quota, budget, frazione):
     return round(budget * kelly * frazione, 2)
 
 # --- SCANSIONE ---
-if st.button("🔍 AVVIA SCANSIONE INTERNAZIONALE"):
+if st.button("AVVIA SCANSIONE"):
     url = f'https://api.the-odds-api.com/v4/sports/{league_id}/odds/'
     params = {'api_key': API_KEY, 'regions': 'eu', 'markets': 'h2h,totals,btts', 'oddsFormat': 'decimal'}
     
@@ -61,7 +61,7 @@ if st.button("🔍 AVVIA SCANSIONE INTERNAZIONALE"):
         data = response.json()
         
         if not data or 'error' in str(data):
-            st.warning("Dati non disponibili o limite API raggiunto.")
+            st.warning("Dati non disponibili. Controlla crediti API.")
         else:
             formatted_results = []
             for match in data:
@@ -79,7 +79,7 @@ if st.button("🔍 AVVIA SCANSIONE INTERNAZIONALE"):
                         elif m['key'] == 'btts':
                             qGG = next((o['price'] for o in m['outcomes'] if o['name'] == 'Yes'), 1.0)
 
-                # Probabilità basate su medie generali (Poisson)
+                # Probabilita basate su medie generali
                 p1, pX, p2, pO, pGG = get_poisson_probs(1.6, 1.2)
                 
                 valori = [
@@ -95,19 +95,19 @@ if st.button("🔍 AVVIA SCANSIONE INTERNAZIONALE"):
                     stake = calc_stake(best['p'], best['q'], bankroll, frazione_kelly)
                     formatted_results.append({
                         "PARTITA": f"{home} - {away}",
-                        "GIOCATA": f"🎯 {best['tipo']} ({best['q']}) - Punta €{stake}",
-                        "VALUE": f"+{best['v']*100:.1f}%"
+                        "GIOCATA": f"{best['tipo']} (Quota: {best['q']}) - Punta: {stake} Euro",
+                        "VALUE": f"{round(best['v']*100, 1)}%"
                     })
 
             if formatted_results:
                 df = pd.DataFrame(formatted_results)
+                # Formattazione grafica senza caratteri speciali
                 st.table(df.style.set_properties(**{
-                    'background-color': '#28a745',
+                    'background-color': 'green',
                     'color': 'white',
-                    'font-weight': 'bold',
-                    'border-color': 'white'
+                    'font-weight': 'bold'
                 }))
             else:
-                st.info("Nessun errore di quota trovato con valore > 5%.")
+                st.info("Nessuna occasione trovata sopra il 5%.")
     except Exception as e:
-        st.error(f"Errore tecnico: {e}")
+        st.error(f"Errore: {e}")

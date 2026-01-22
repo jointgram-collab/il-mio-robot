@@ -8,12 +8,12 @@ if 'portafoglio' not in st.session_state:
     st.session_state['portafoglio'] = []
 if 'ultimi_risultati' not in st.session_state:
     st.session_state['ultimi_risultati'] = []
-if 'campionato_corrente' not in st.session_state:
-    st.session_state['campionato_corrente'] = ""
+if 'api_residue' not in st.session_state:
+    st.session_state['api_residue'] = "N/D"
 
-st.set_page_config(page_title="AI SNIPER V9.2 - Full Leagues", layout="wide")
+st.set_page_config(page_title="AI SNIPER V9.3 - Professional Mode", layout="wide")
 
-# --- 2. FUNZIONE DI SALVATAGGIO (CALLBACK) ---
+# --- 2. FUNZIONI DI CALLBACK ---
 def aggiungi_a_portafoglio(match, scelta, quota, stake, bookmaker, data_match):
     giocata = {
         "Data Match": data_match,
@@ -23,11 +23,14 @@ def aggiungi_a_portafoglio(match, scelta, quota, stake, bookmaker, data_match):
         "Stake": stake,
         "Bookmaker": bookmaker,
         "Esito": "Pendente",
-        "Profitto": 0.0,
-        "Registrato il": datetime.now().strftime("%H:%M:%S")
+        "Profitto": 0.0
     }
     st.session_state['portafoglio'].append(giocata)
-    st.toast(f"✅ Registrata nel Portafoglio: {match}")
+    st.toast(f"✅ Registrata: {match}")
+
+def elimina_schedina(index):
+    st.session_state['portafoglio'].pop(index)
+    st.toast("🗑️ Schedina eliminata")
 
 # --- 3. FUNZIONI TECNICHE ---
 def get_totals_value(q_over, q_under):
@@ -48,13 +51,11 @@ t1, t2, t3 = st.tabs(["🔍 SCANNER VALORE", "💼 PORTAFOGLIO ATTIVO", "📊 AN
 with t1:
     with st.sidebar:
         st.header("⚙️ Parametri")
-        budget = st.number_input("Budget (€)", value=1000.0)
+        budget_cassa = st.number_input("Budget Cassa (€)", value=1000.0)
         rischio = st.slider("Aggressività (Kelly)", 0.10, 0.50, 0.25)
         soglia = st.slider("Filtro Valore (%)", 0.0, 10.0, 2.0) / 100
-        
         st.divider()
-        st.write("**LEGENDA:**")
-        st.write("Priorità Bookmaker: Bet365, Snai, Better")
+        st.metric("Crediti API Residui", st.session_state['api_residue'])
 
     leagues = {
         "EUROPA: Champions League": "soccer_uefa_champions_league",
@@ -63,14 +64,13 @@ with t1:
         "ITALIA: Serie A": "soccer_italy_serie_a", 
         "ITALIA: Serie B": "soccer_italy_serie_b",
         "UK: Premier League": "soccer_england_league_1", 
-        "UK: Championship": "soccer_england_league_2",
         "SPAGNA: La Liga": "soccer_spain_la_liga",
         "GERMANIA: Bundesliga": "soccer_germany_bundesliga", 
         "FRANCIA: Ligue 1": "soccer_france_ligue_1",
         "OLANDA: Eredivisie": "soccer_netherlands_eredivisie"
     }
     
-    sel_league = st.selectbox("Seleziona Campionato o Coppa:", list(leagues.keys()))
+    sel_league = st.selectbox("Seleziona competizione:", list(leagues.keys()))
 
     if st.button("🚀 AVVIA SCANSIONE"):
         API_KEY = '01f1c8f2a314814b17de03eeb6c53623'
@@ -81,32 +81,21 @@ with t1:
             res = requests.get(url, params=params)
             if res.status_code == 200:
                 st.session_state['ultimi_risultati'] = res.json()
-                st.session_state['campionato_corrente'] = sel_league
-                st.success(f"Scansione {sel_league} completata! Crediti: {res.headers.get('x-requests-remaining')}")
+                st.session_state['api_residue'] = res.headers.get('x-requests-remaining', 'N/D')
+                st.rerun()
             else:
                 st.error("Errore API. Controlla i crediti.")
         except:
             st.error("Errore di connessione.")
 
-    # Visualizzazione Risultati
     if st.session_state['ultimi_risultati']:
-        st.write(f"### Risultati per: {st.session_state['campionato_corrente']}")
         priorita = ["Bet365", "Snai", "Better"]
-        
         for m in st.session_state['ultimi_risultati']:
             home, away = m['home_team'], m['away_team']
             date_match = datetime.strptime(m['commence_time'], "%Y-%m-%dT%H:%M:%SZ").strftime("%d/%m %H:%M")
             
-            # Selezione Bookmaker Prioritario
-            best_bk = None
-            for nome_pref in priorita:
-                found = next((b for b in m.get('bookmakers', []) if nome_pref.lower() in b['title'].lower()), None)
-                if found:
-                    best_bk = found
-                    break
-            
-            if not best_bk and m.get('bookmakers'):
-                best_bk = m['bookmakers'][0]
+            best_bk = next((b for p in priorita for b in m.get('bookmakers', []) if p.lower() in b['title'].lower()), None)
+            if not best_bk and m.get('bookmakers'): best_bk = m['bookmakers'][0]
             
             if best_bk:
                 mk = next((x for x in best_bk['markets'] if x['key'] == 'totals'), None)
@@ -115,43 +104,46 @@ with t1:
                     q_under = next((o['price'] for o in mk['outcomes'] if o['name'] == 'Under' and o['point'] == 2.5), 1.0)
                     p_ov_e, p_un_e = get_totals_value(q_over, q_under)
                     
-                    opzioni = [
-                        {"T": "OVER 2.5", "Q": q_over, "P": p_ov_e + 0.07},
-                        {"T": "UNDER 2.5", "Q": q_under, "P": p_un_e + 0.07}
-                    ]
+                    opzioni = [{"T": "OVER 2.5", "Q": q_over, "P": p_ov_e + 0.07}, {"T": "UNDER 2.5", "Q": q_under, "P": p_un_e + 0.07}]
                     best = max(opzioni, key=lambda x: (x['P'] * x['Q']) - 1)
                     valore = (best['P'] * best['Q']) - 1
                     
                     if valore > soglia:
-                        stake = calc_stake(best['P'], best['Q'], budget, rischio)
-                        with st.container():
-                            c1, c2, c3 = st.columns([3, 2, 1])
-                            c1.markdown(f"📅 {date_match}  \n**{home} - {away}**")
-                            c2.markdown(f"🎯 **{best['T']}** @ **{best['Q']}** \n🏟️ {best_bk['title']} | Stake: **{stake}€**")
-                            
-                            c3.button("AGGIUNGI", key=f"btn_{home}_{best['T']}_{best_bk['title']}", 
-                                      on_click=aggiungi_a_portafoglio, 
-                                      args=(f"{home}-{away}", best['T'], best['Q'], stake, best_bk['title'], date_match))
-                            st.divider()
+                        stake = calc_stake(best['P'], best['Q'], budget_cassa, rischio)
+                        c1, c2, c3 = st.columns([3, 2, 1])
+                        c1.markdown(f"📅 {date_match}  \n**{home} - {away}**")
+                        c2.markdown(f"🎯 **{best['T']}** @ **{best['Q']}** \n🏟️ {best_bk['title']} | Stake: **{stake}€**")
+                        c3.button("AGGIUNGI", key=f"btn_{home}_{best['T']}", on_click=aggiungi_a_portafoglio, 
+                                  args=(f"{home}-{away}", best['T'], best['Q'], stake, best_bk['title'], date_match))
+                        st.divider()
 
 with t2:
+    # --- CALCOLO TOTALI ---
+    investimento_pendente = sum(b['Stake'] for b in st.session_state['portafoglio'] if b['Esito'] == "Pendente")
     st.subheader("💼 Portafoglio Strategico")
+    st.info(f"💰 Importo Totale Scommesso (Pendenti): **{round(investimento_pendente, 2)} €**")
+
     if st.session_state['portafoglio']:
-        for i, b in enumerate(st.session_state['portafoglio']):
+        # Mostriamo le schedine in ordine inverso (l'ultima aggiunta in alto)
+        for i, b in enumerate(reversed(st.session_state['portafoglio'])):
+            real_index = len(st.session_state['portafoglio']) - 1 - i
             if b['Esito'] == "Pendente":
                 with st.expander(f"📌 {b['Match']} - {b['Scelta']} @ {b['Quota']}", expanded=True):
-                    col1, col2, col3 = st.columns([3, 1, 1])
-                    col1.write(f"Bookmaker: **{b['Bookmaker']}** | Puntata: **{b['Stake']}€**")
-                    if col2.button("✅ VINTO", key=f"win_{i}"):
-                        st.session_state['portafoglio'][i]['Esito'] = "VINTO"
-                        st.session_state['portafoglio'][i]['Profitto'] = round((b['Stake']*b['Quota'])-b['Stake'], 2)
+                    col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
+                    col1.write(f"Book: **{b['Bookmaker']}** \nPuntata: **{b['Stake']}€**")
+                    if col2.button("✅ VINTO", key=f"win_{real_index}"):
+                        st.session_state['portafoglio'][real_index]['Esito'] = "VINTO"
+                        st.session_state['portafoglio'][real_index]['Profitto'] = round((b['Stake']*b['Quota'])-b['Stake'], 2)
                         st.rerun()
-                    if col3.button("❌ PERSO", key=f"loss_{i}"):
-                        st.session_state['portafoglio'][i]['Esito'] = "PERSO"
-                        st.session_state['portafoglio'][i]['Profitto'] = -b['Stake']
+                    if col3.button("❌ PERSO", key=f"loss_{real_index}"):
+                        st.session_state['portafoglio'][real_index]['Esito'] = "PERSO"
+                        st.session_state['portafoglio'][real_index]['Profitto'] = -b['Stake']
+                        st.rerun()
+                    if col4.button("🗑️ ELIMINA", key=f"del_{real_index}"):
+                        elimina_schedina(real_index)
                         st.rerun()
     else:
-        st.info("Nessuna giocata attiva. Usa lo Scanner per aggiungere partite.")
+        st.info("Portafoglio vuoto.")
 
 with t3:
     st.subheader("📊 Bilancio Fiscale Target 5.000€")
@@ -162,14 +154,8 @@ with t3:
         m1, m2, m3 = st.columns(3)
         m1.metric("Profitto Netto", f"{round(profitto_netto, 2)} €")
         m2.metric("Target Residuo", f"{round(5000 - profitto_netto, 2)} €")
-        m3.metric("Giocate Chiuse", len(df[df['Esito'] != "Pendente"]))
+        m3.metric("ROI Medio %", f"{round((profitto_netto / df[df['Esito']!='Pendente']['Stake'].sum() * 100), 1) if not df[df['Esito']!='Pendente'].empty else 0}%")
         
         st.divider()
-        st.write("### Storico Operazioni")
+        st.write("### Registro Storico Completo")
         st.dataframe(df, use_container_width=True)
-        
-        if st.button("🗑️ CANCELLA TUTTO LO STORICO"):
-            st.session_state['portafoglio'] = []
-            st.rerun()
-    else:
-        st.info("Inizia a registrare le giocate per vedere le statistiche.")

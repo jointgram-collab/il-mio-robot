@@ -33,19 +33,28 @@ bankroll = st.sidebar.number_input("Budget Attuale (€)", value=1000)
 frazione_kelly = st.sidebar.slider("Rischio (Kelly)", 0.05, 0.5, 0.15)
 soglia_valore = st.sidebar.slider("Filtro Valore (Minimo %)", 0.0, 10.0, 1.0) / 100
 
+# --- MAPPA CAMPIONATI COMPLETA ---
 leagues_map = {
     "ITALIA: Serie A": "soccer_italy_serie_a", 
+    "ITALIA: Serie B": "soccer_italy_serie_b",
+    "EUROPA: Champions League": "soccer_uefa_champs_league", 
+    "EUROPA: Europa League": "soccer_uefa_europa_league",
     "UK: Premier League": "soccer_england_league_1", 
-    "SPAGNA: La Liga": "soccer_spain_la_liga",
+    "UK: Championship": "soccer_england_league_2",
+    "UK: League One": "soccer_england_league_3",
     "GERMANIA: Bundesliga": "soccer_germany_bundesliga",
+    "GERMANIA: Bundesliga 2": "soccer_germany_bundesliga_2",
+    "SPAGNA: La Liga": "soccer_spain_la_liga", 
+    "SPAGNA: La Liga 2": "soccer_spain_segunda_division",
     "FRANCIA: Ligue 1": "soccer_france_ligue_1",
-    "EUROPA: Champions": "soccer_uefa_champs_league"
+    "FRANCIA: Ligue 2": "soccer_france_ligue_2",
+    "OLANDA: Eredivisie": "soccer_netherlands_eredivisie"
 }
 
 tab1, tab2, tab3 = st.tabs(["🔍 SCANNER", "📖 DIARIO", "📊 TARGET"])
 
 with tab1:
-    sel_league = st.selectbox("Campionato", list(leagues_map.keys()))
+    sel_league = st.selectbox("Seleziona Competizione", list(leagues_map.keys()))
     if st.button("AVVIA RICERCA"):
         API_KEY = '01f1c8f2a314814b17de03eeb6c53623'
         url = f'https://api.the-odds-api.com/v4/sports/{leagues_map[sel_league]}/odds/'
@@ -53,13 +62,12 @@ with tab1:
         
         try:
             res = requests.get(url, params=params)
-            
             if res.status_code != 200:
-                st.error(f"Errore API {res.status_code}: {res.text}")
+                st.error(f"Errore API {res.status_code}: Controlla crediti o chiave.")
             else:
                 data = res.json()
                 if not data:
-                    st.warning("Nessuna partita trovata per questo campionato oggi.")
+                    st.warning("Nessuna partita quotata trovata per questo campionato al momento.")
                 else:
                     st.success(f"Dati Ricevuti! Crediti rimasti: {res.headers.get('x-requests-remaining')}")
                     found = False
@@ -92,23 +100,38 @@ with tab1:
                         if best['v'] > soglia_valore:
                             found = True
                             stake = calc_stake(best['p'], best['q'], bankroll, frazione_kelly)
-                            col_a, col_b = st.columns([3, 1])
-                            col_a.write(f"**{home}-{away}** | {best['tipo']} @ {best['q']} (Valore: {round(best['v']*100,1)}%)")
-                            if col_b.button("REGISTRA", key=f"btn_{home}_{best['tipo']}"):
-                                st.session_state.diario.append({"Match": f"{home}-{away}", "Giocata": best['tipo'], "Quota": best['q'], "Stake": stake, "Esito": "IN CORSO"})
-                                st.rerun()
-                    if not found: st.info("Nessuna opportunità con il filtro attuale.")
-        except Exception as e:
-            st.error(f"Errore di sistema: {e}")
+                            with st.container():
+                                c1, c2, c3 = st.columns([3, 2, 1])
+                                c1.write(f"⚽ **{home}-{away}**\n\n*Book: {bk['title']}*")
+                                c2.info(f"🎯 **{best['tipo']}** @ {best['q']}\n\nValue: {round(best['v']*100,1)}%")
+                                if c3.button("REGISTRA", key=f"btn_{home}_{best['tipo']}"):
+                                    st.session_state.diario.append({
+                                        "Match": f"{home}-{away}", "Giocata": best['tipo'], 
+                                        "Quota": best['q'], "Stake": stake, "Esito": "IN CORSO", "Ritorno": 0
+                                    })
+                                    st.toast("Salvato!")
+                    if not found: st.info("Nessuna opportunità con i criteri selezionati.")
+        except Exception as e: st.error(f"Errore: {e}")
 
 with tab2:
     if st.session_state.diario:
         for i, b in enumerate(st.session_state.diario):
-            st.write(f"{b['Match']} - {b['Giocata']} @ {b['Quota']} - {b['Esito']}")
-            if st.button("ELIMINA", key=f"del_{i}"):
-                st.session_state.diario.pop(i)
-                st.rerun()
+            with st.expander(f"{b['Match']} - {b['Giocata']} ({b['Esito']})"):
+                col_e, col_s, col_d = st.columns(3)
+                nuovo = col_e.selectbox("Esito", ["IN CORSO", "VINTO", "PERSO"], key=f"esito_{i}")
+                if col_s.button("SALVA", key=f"save_{i}"):
+                    st.session_state.diario[i]['Esito'] = nuovo
+                    st.session_state.diario[i]['Ritorno'] = b['Stake'] * b['Quota'] if nuovo == "VINTO" else 0
+                    st.rerun()
+                if col_d.button("ELIMINA", key=f"del_{i}"):
+                    st.session_state.diario.pop(i)
+                    st.rerun()
     else: st.info("Diario vuoto.")
 
 with tab3:
-    st.write("Analisi Target: In fase di implementazione dati...")
+    if st.session_state.diario:
+        df = pd.DataFrame(st.session_state.diario)
+        giocato = df['Stake'].sum()
+        vinto = df['Ritorno'].sum()
+        st.metric("P/L NETTO", f"{vinto - giocato:.2f}€", delta=f"{vinto - giocato:.2f}€")
+        st.dataframe(df)

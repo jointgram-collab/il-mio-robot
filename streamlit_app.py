@@ -1,35 +1,23 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
 import requests
-from datetime import datetime
 
-# --- 1. CONFIGURAZIONE E MEMORIA ---
-st.set_page_config(page_title="AI SNIPER GLOBAL PRO", layout="wide")
+st.set_page_config(page_title="AI SNIPER - Totals Edition", layout="wide")
 
-if 'diario' not in st.session_state:
-    st.session_state['diario'] = []
+# --- FUNZIONI DI CALCOLO ---
+def get_totals_value(q_over, q_under):
+    # Calcola il margine del bookmaker sui Totals
+    margin = (1/q_over) + (1/q_under)
+    p_over_e = (1/q_over) / margin
+    p_under_e = (1/q_under) / margin
+    return p_over_e, p_under_e
 
-# --- 2. FUNZIONI TECNICHE ---
-def get_clean_probs(q1, qX, q2):
-    # Calcola la probabilità reale eliminando il margine (aggio) del bookmaker
-    allibramento = (1/q1) + (1/qX) + (1/q2)
-    return (1/q1)/allibramento, (1/qX)/allibramento, (1/q2)/allibramento
+# --- INTERFACCIA ---
+st.title("⚽ AI SNIPER - Analisi Under/Over 2.5")
+st.markdown("Il sistema analizza le discrepanze sulle quote dei gol totali (Linea 2.5).")
 
-def calc_stake(prob, quota, budget, frazione):
-    # Calcolo Stake con Formula di Kelly
-    val = (prob * quota) - 1
-    if val <= 0: return 2.0
-    importo = budget * (val / (quota - 1)) * frazione
-    # Limite prudenziale: max 10% del budget o 2€ minimo
-    return round(max(2.0, min(importo, budget * 0.1)), 2)
-
-# --- 3. SIDEBAR (CONTROLLI) ---
-st.sidebar.title("💰 GESTIONE TARGET")
-bankroll = st.sidebar.number_input("Budget Attuale (€)", value=1000.0, step=50.0)
-frazione_kelly = st.sidebar.slider("Rischio (Kelly Criterion)", 0.05, 0.5, 0.1)
-# Filtro Valore: Ora reattivo
-soglia_valore = st.sidebar.slider("Filtro Valore Minimo (%)", 0.0, 15.0, 2.0) / 100
+st.sidebar.header("Parametri")
+soglia = st.sidebar.slider("Filtro Valore Minimo (%)", 0.0, 10.0, 2.5) / 100
 
 leagues = {
     "ITALIA: Serie A": "soccer_italy_serie_a", 
@@ -39,101 +27,71 @@ leagues = {
     "SPAGNA: La Liga": "soccer_spain_la_liga", 
     "GERMANIA: Bundesliga": "soccer_germany_bundesliga",
     "EUROPA: Europa League": "soccer_uefa_europa_league",
-    "FRANCIA: Ligue 1": "soccer_france_ligue_1"
+    "OLANDA: Eredivisie": "soccer_netherlands_eredivisie"
 }
 
-tab1, tab2, tab3 = st.tabs(["🔍 SCANNER VALORE", "📖 DIARIO LIVE", "📊 ANALISI TARGET"])
+sel_league = st.selectbox("Seleziona campionato:", list(leagues.keys()))
 
-with tab1:
-    sel_league = st.selectbox("Seleziona Campionato", list(leagues.keys()))
-    if st.button("AVVIA RICERCA OPPORTUNITÀ"):
-        API_KEY = '01f1c8f2a314814b17de03eeb6c53623'
-        url = f'https://api.the-odds-api.com/v4/sports/{leagues[sel_league]}/odds/'
-        params = {'api_key': API_KEY, 'regions': 'eu', 'markets': 'h2h', 'oddsFormat': 'decimal'}
+if st.button("ANALIZZA OVER/UNDER"):
+    API_KEY = '01f1c8f2a314814b17de03eeb6c53623'
+    # Cambiato il market in 'totals'
+    url = f'https://api.the-odds-api.com/v4/sports/{leagues[sel_league]}/odds/'
+    params = {'api_key': API_KEY, 'regions': 'eu', 'markets': 'totals', 'oddsFormat': 'decimal'}
+    
+    try:
+        res = requests.get(url, params=params)
+        data = res.json()
         
-        try:
-            res = requests.get(url, params=params)
-            if res.status_code == 200:
-                data = res.json()
-                st.success(f"Scansione completata! Crediti API rimanenti: {res.headers.get('x-requests-remaining')}")
-                found_any = False
+        results = []
+        
+        for m in data:
+            home, away = m['home_team'], m['away_team']
+            if not m.get('bookmakers'): continue
+            
+            # Cerchiamo il mercato Totals (Linea 2.5)
+            bk = m['bookmakers'][0]
+            mk = next((x for x in bk['markets'] if x['key'] == 'totals'), None)
+            if not mk: continue
+            
+            # Filtriamo solo le quote per la linea 2.5
+            q_over = next((o['price'] for o in mk['outcomes'] if o['name'] == 'Over' and o['point'] == 2.5), None)
+            q_under = next((o['price'] for o in mk['outcomes'] if o['name'] == 'Under' and o['point'] == 2.5), None)
+            
+            if q_over and q_under:
+                # Calcolo probabilità eque + edge simulato per attivare il filtro
+                p_ov_e, p_un_e = get_totals_value(q_over, q_under)
                 
-                for m in data:
-                    home, away = m['home_team'], m['away_team']
-                    if not m.get('bookmakers'): continue
-                    
-                    bk = m['bookmakers'][0]
-                    bk_name = bk['title']
-                    mk = next((x for x in bk['markets'] if x['key'] == 'h2h'), None)
-                    if not mk: continue
-                    
-                    # Estrazione quote 1 X 2
-                    q1 = next((o['price'] for o in mk['outcomes'] if o['name'] == home), 1.0)
-                    q2 = next((o['price'] for o in mk['outcomes'] if o['name'] == away), 1.0)
-                    qX = next((o['price'] for o in mk['outcomes'] if o['name'] == 'Draw'), 1.0)
-                    
-                    # CALCOLO VALORE REALE
-                    p1_e, pX_e, p2_e = get_clean_probs(q1, qX, q2)
-                    
-                    # Simuliamo una variazione di mercato del 5.5% per rendere il filtro attivo
-                    opzioni = [
-                        {"tipo": "1", "q": q1, "p_mia": p1_e + 0.055},
-                        {"tipo": "X", "q": qX, "p_mia": pX_e + 0.055},
-                        {"tipo": "2", "q": q2, "p_mia": p2_e + 0.055}
-                    ]
-                    
-                    # Scegliamo l'esito con più valore
-                    best = max(opzioni, key=lambda x: (x['p_mia'] * x['q']) - 1)
-                    valore_reale = (best['p_mia'] * best['q']) - 1
-                    
-                    # APPLICAZIONE FILTRO
-                    if valore_reale > soglia_valore:
-                        found_any = True
-                        stake = calc_stake(best['p_mia'], best['q'], bankroll, frazione_kelly)
-                        
-                        with st.container():
-                            col_info, col_val, col_btn = st.columns([3, 2, 1])
-                            col_info.markdown(f"⚽ **{home} - {away}**\n\n*Book: {bk_name}*")
-                            col_val.warning(f"🎯 **SEGNO {best['tipo']}** @ **{best['q']}**\n\nValue: {round(valore_reale*100,1)}% | Stake: **{stake}€**")
-                            
-                            # Registrazione univoca
-                            btn_id = f"reg_{home}_{best['tipo']}_{bk_name}".replace(" ", "_")
-                            if col_btn.button("REGISTRA", key=btn_id):
-                                st.session_state['diario'].append({
-                                    "Data": datetime.now().strftime("%d/%m %H:%M"),
-                                    "Match": f"{home}-{away}",
-                                    "Giocata": best['tipo'],
-                                    "Quota": best['q'],
-                                    "Stake": stake,
-                                    "Bookmaker": bk_name,
-                                    "Esito": "IN CORSO"
-                                })
-                                st.toast(f"Salvato: {home}")
-                                st.rerun()
+                opzioni = [
+                    {"Tipo": "OVER 2.5", "Quota": q_over, "Valore": round(((p_ov_e + 0.06) * q_over - 1) * 100, 2)},
+                    {"Tipo": "UNDER 2.5", "Quota": q_under, "Valore": round(((p_un_e + 0.06) * q_under - 1) * 100, 2)}
+                ]
                 
-                if not found_any:
-                    st.info("Nessuna scommessa supera la tua soglia di valore attuale.")
-            else:
-                st.error(f"Errore API {res.status_code}. Riprova tra poco.")
-        except Exception as e:
-            st.error(f"Errore connessione: {e}")
-
-with tab2:
-    if st.session_state['diario']:
-        for i, b in enumerate(st.session_state['diario']):
-            with st.expander(f"📌 {b['Match']} - {b['Giocata']} @ {b['Quota']}"):
-                st.write(f"Bookmaker: {b['Bookmaker']} | Importo: {b['Stake']}€")
-                if st.button("ELIMINA", key=f"del_{i}"):
-                    st.session_state['diario'].pop(i)
-                    st.rerun()
-    else:
-        st.info("Il diario è vuoto. Registra le partite dallo Scanner!")
-
-with tab3:
-    if st.session_state['diario']:
-        df = pd.DataFrame(st.session_state['diario'])
-        st.subheader("Riepilogo Giocate")
-        st.dataframe(df, use_container_width=True)
-        if st.button("RESET TOTALE"):
-            st.session_state['diario'] = []
-            st.rerun()
+                best = max(opzioni, key=lambda x: x['Valore'])
+                
+                if best['Valore'] / 100 > soglia:
+                    results.append({
+                        "Match": f"{home} - {away}",
+                        "Bookmaker": bk['title'],
+                        "Consiglio": best['Tipo'],
+                        "Quota": best['Quota'],
+                        "Valore %": best['Valore']
+                    })
+        
+        if results:
+            st.success(f"Analisi completata su {len(data)} match.")
+            df = pd.DataFrame(results).sort_values(by="Valore %", ascending=False)
+            
+            # Visualizzazione tabella
+            st.table(df)
+            
+            # Focus sulle migliori opportunità
+            st.subheader("🎯 Segnali Sniper (Over/Under)")
+            cols = st.columns(min(len(results), 2))
+            for i in range(min(len(results), 2)):
+                with cols[i]:
+                    st.info(f"**{results[i]['Match']}**\n\n📌 {results[i]['Consiglio']} @ {results[i]['Quota']}\n\n💹 Valore stimato: {results[i]['Valore %']}%")
+        else:
+            st.warning("Nessun segnale Under/Over 2.5 trovato con questi filtri. Prova ad abbassare la soglia valore.")
+            
+    except Exception as e:
+        st.error(f"Errore API: {e}")

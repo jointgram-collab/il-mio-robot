@@ -4,24 +4,31 @@ import requests
 from datetime import datetime
 from streamlit_gsheets import GSheetsConnection
 
-# --- CONFIGURAZIONE UI STANDARD (ALTA LEGGIBILITÀ) ---
-st.set_page_config(page_title="AI SNIPER V11.14 - API Shield", layout="wide")
+# --- CONFIGURAZIONE UI STANDARD ---
+st.set_page_config(page_title="AI SNIPER V11.15 - Euro Edition", layout="wide")
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 API_KEY = '01f1c8f2a314814b17de03eeb6c53623'
 
-# --- MAPPA URL BOOKMAKERS ---
-BK_URLS = {
-    "Bet365": "https://www.bet365.it", "Snai": "https://www.snai.it",
-    "Better": "https://www.lottomatica.it/scommesse", "Planetwin365": "https://www.planetwin365.it",
-    "Eurobet": "https://www.eurobet.it", "Goldbet": "https://www.goldbet.it", "Sisal": "https://www.sisal.it"
+# --- LISTA BOOKMAKER AUTORIZZATI EUROPA ---
+BK_EURO_AUTH = {
+    "Bet365": "https://www.bet365.it", 
+    "Snai": "https://www.snai.it",
+    "Better": "https://www.lottomatica.it/scommesse", 
+    "Planetwin365": "https://www.planetwin365.it",
+    "Eurobet": "https://www.eurobet.it", 
+    "Goldbet": "https://www.goldbet.it", 
+    "Sisal": "https://www.sisal.it",
+    "Bwin": "https://www.bwin.it",
+    "William Hill": "https://www.williamhill.it",
+    "888sport": "https://www.888sport.it"
 }
 
 def get_bk_link(name):
-    url = BK_URLS.get(name, f"https://www.google.com/search?q={name}")
+    url = BK_EURO_AUTH.get(name, f"https://www.google.com/search?q={name}")
     return f"[{name}]({url})"
 
-# --- FUNZIONI DATABASE ---
+# --- FUNZIONI CORE ---
 def carica_db():
     try:
         return conn.read(worksheet="Giocate", ttl="0").dropna(how='all')
@@ -31,7 +38,6 @@ def carica_db():
 def salva_db(df):
     conn.update(worksheet="Giocate", data=df)
 
-# --- LOGICA VALORE ---
 def get_totals_value(q_over, q_under):
     margin = (1/q_over) + (1/q_under)
     return (1/q_over) / margin, (1/q_under) / margin
@@ -43,7 +49,7 @@ def calc_stake(prob, quota, budget, frazione):
     return round(max(2.0, min(importo, budget * 0.1)), 2)
 
 # --- INTERFACCIA ---
-st.title("🎯 AI SNIPER V11.14")
+st.title("🎯 AI SNIPER V11.15 (EU Only)")
 
 if 'api_data' not in st.session_state: st.session_state['api_data'] = []
 
@@ -62,26 +68,31 @@ with t1:
         "GERMANIA: Bundesliga": "soccer_germany_bundesliga", "EUROPA: Champions": "soccer_uefa_champions_league",
         "EUROPA: Europa League": "soccer_uefa_europa_league", "FRANCIA: Ligue 1": "soccer_france_ligue_1"
     }
-    sel_league = st.selectbox("Seleziona Campionato:", list(leagues.keys()))
+    sel_league = st.selectbox("Campionato:", list(leagues.keys()))
 
     if st.button("🚀 AVVIA SCANSIONE"):
+        # Parametro regions=eu forza l'API a considerare solo bookmaker europei
         res = requests.get(f'https://api.the-odds-api.com/v4/sports/{leagues[sel_league]}/odds/', 
                            params={'api_key': API_KEY, 'regions': 'eu', 'markets': 'totals'})
         st.session_state['api_rem'] = res.headers.get('x-requests-remaining')
         if res.status_code == 200:
             st.session_state['api_data'] = res.json()
         else:
-            st.error(f"Errore API: {res.status_code}. Controlla i crediti o il campionato.")
+            st.error(f"Errore API: {res.status_code}")
 
     if 'api_rem' in st.session_state:
         st.write(f"💳 **Credito Residuo API:** {st.session_state['api_rem']}")
 
     if st.session_state['api_data']:
+        # Mostriamo solo i match dove è presente almeno un bookmaker della nostra lista
         for m in st.session_state['api_data']:
             try:
                 home, away = m['home_team'], m['away_team']
                 date_m = datetime.strptime(m['commence_time'], "%Y-%m-%dT%H:%M:%SZ").strftime("%d/%m %H:%M")
-                bk = m['bookmakers'][0] if m.get('bookmakers') else None
+                
+                # Filtro: cerca il primo bookmaker nella lista dei match che appartiene alla nostra whitelist EU
+                bk = next((b for b in m.get('bookmakers', []) if b['title'] in BK_EURO_AUTH), None)
+                
                 if bk:
                     mk = next((x for x in bk['markets'] if x['key'] == 'totals'), None)
                     if mk:
@@ -101,7 +112,7 @@ with t1:
                             if c3.button("ADD", key=f"add_{home}_{date_m}_{best['Q']}".replace(" ","_")):
                                 nuova = {"Data Match": date_m, "Match": f"{home}-{away}", "Scelta": best['T'], "Quota": best['Q'], "Stake": stake, "Bookmaker": bk['title'], "Esito": "Pendente", "Profitto": 0.0, "Sport_Key": leagues[sel_league]}
                                 salva_db(pd.concat([carica_db(), pd.DataFrame([nuova])], ignore_index=True))
-                                st.toast("✅ Sincronizzato!")
+                                st.toast("✅ Aggiunto!")
                             st.divider()
             except Exception: continue
 
@@ -131,4 +142,5 @@ with t3:
         prof = round(df_f['Profitto'].sum(), 2)
         st.metric("Profitto Netto", f"{prof} €", delta=f"{round(5000-prof, 2)}€ al target")
         for i, row in df_f.iterrows():
-            st.write(f"{'🟢' if row['Esito']=='VINTO' else '🔴' if row['Esito']=='PERSO' else '⏳'} **{row['Match']}** ({row['Data Match']}): {row['Profitto']}€")
+            status = "🟢" if row['Esito']=='VINTO' else "🔴" if row['Esito']=='PERSO' else "⏳"
+            st.write(f"{status} **{row['Match']}** ({row['Data Match']}): {row['Profitto']}€")

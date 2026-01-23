@@ -4,9 +4,10 @@ import requests
 from datetime import datetime
 from streamlit_gsheets import GSheetsConnection
 
-# --- CONFIGURAZIONE ---
-st.set_page_config(page_title="AI SNIPER V11.2 - Fix Keys", layout="wide")
+# --- CONFIGURAZIONE E MEMORIA ---
+st.set_page_config(page_title="AI SNIPER V11.4 - Vincite Potenziali", layout="wide")
 
+# Connessione Google Sheets (usa le credenziali nei Secrets)
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def carica_db():
@@ -21,6 +22,7 @@ def salva_giocata(nuova_giocata):
     df_finale = pd.concat([df_attuale, pd.DataFrame([nuova_giocata])], ignore_index=True)
     conn.update(worksheet="Giocate", data=df_finale)
 
+# Funzioni tecniche
 def get_totals_value(q_over, q_under):
     margin = (1/q_over) + (1/q_under)
     return (1/q_over) / margin, (1/q_under) / margin
@@ -31,6 +33,7 @@ def calc_stake(prob, quota, budget, frazione):
     importo = budget * (valore / (quota - 1)) * frazione
     return round(max(2.0, min(importo, budget * 0.1)), 2)
 
+# --- CALLBACKS ---
 def aggiungi_a_cloud(match, scelta, quota, stake, book, data):
     giocata = {
         "Data Match": data, "Match": match, "Scelta": scelta,
@@ -41,7 +44,7 @@ def aggiungi_a_cloud(match, scelta, quota, stake, book, data):
     st.toast(f"✅ Sincronizzato Cloud: {match}")
 
 # --- INTERFACCIA ---
-st.title("🎯 AI SNIPER V11.2")
+st.title("🎯 AI SNIPER V11.4")
 
 if 'ultimi_risultati' not in st.session_state:
     st.session_state['ultimi_risultati'] = []
@@ -51,7 +54,7 @@ t1, t2, t3 = st.tabs(["🔍 SCANNER VALORE", "💼 PORTAFOGLIO CLOUD", "📊 AND
 with t1:
     with st.sidebar:
         st.header("⚙️ Parametri")
-        budget = st.number_input("Cassa (€)", value=1000.0)
+        budget_cassa = st.number_input("Cassa (€)", value=1000.0)
         rischio = st.slider("Aggressività (Kelly)", 0.10, 0.50, 0.25)
         soglia = st.slider("Filtro Valore (%)", 0.0, 10.0, 2.0) / 100
         
@@ -73,7 +76,7 @@ with t1:
         res = requests.get(url, params=params)
         if res.status_code == 200:
             st.session_state['ultimi_risultati'] = res.json()
-            st.success(f"Dati caricati! Crediti API: {res.headers.get('x-requests-remaining')}")
+            st.success(f"Dati caricati! Crediti API Residui: {res.headers.get('x-requests-remaining')}")
 
     if st.session_state['ultimi_risultati']:
         priorita = ["Bet365", "Snai", "Better"]
@@ -96,46 +99,64 @@ with t1:
                     val = (best['P'] * best['Q']) - 1
                     
                     if val > soglia:
-                        stake = calc_stake(best['P'], best['Q'], budget, rischio)
+                        stake = calc_stake(best['P'], best['Q'], budget_cassa, rischio)
+                        possibile_vincita = round(stake * best['Q'], 2)
+                        
                         c1, c2, c3 = st.columns([3, 2, 1])
                         c1.write(f"📅 {date_m}\n**{home}-{away}**")
-                        c2.write(f"🎯 {best['T']} @{best['Q']} ({best_bk['title']})\n💰 Stake: {stake}€")
+                        c2.markdown(f"🎯 **{best['T']}** @**{best['Q']}** ({best_bk['title']})  \n💰 Stake: **{stake}€** | 💸 Vincita: **{possibile_vincita}€**")
                         
-                        # CHIAVE UNICA GENERATA QUI
                         u_key = f"btn_{home}_{away}_{best['T']}_{best_bk['title']}_{date_m}".replace(" ", "_")
                         c3.button("AGGIUNGI", key=u_key, on_click=aggiungi_a_cloud, 
                                   args=(f"{home}-{away}", best['T'], best['Q'], stake, best_bk['title'], date_m))
                         st.divider()
 
 with t2:
-    st.subheader("💼 Portafoglio Cloud")
+    st.subheader("💼 Portafoglio Cloud Sincronizzato")
     df_c = carica_db()
     if not df_c.empty:
         pendenti = df_c[df_c['Esito'] == "Pendente"]
-        st.info(f"💰 Totale Scommesso: {round(pendenti['Stake'].sum(), 2)}€")
+        tot_impegnato = round(pendenti['Stake'].sum(), 2)
+        tot_potenziale = round((pendenti['Stake'] * pendenti['Quota']).sum(), 2)
+        
+        col_m1, col_m2 = st.columns(2)
+        col_m1.info(f"💰 Totale Scommesso: **{tot_impegnato}€**")
+        col_m2.success(f"📈 Ritorno Potenziale Totale: **{tot_potenziale}€**")
+        
+        st.divider()
+
         for i, r in pendenti.iterrows():
-            with st.expander(f"📌 {r['Match']} - {r['Scelta']}"):
+            vincita_singola = round(r['Stake'] * r['Quota'], 2)
+            with st.expander(f"📌 {r['Match']} - Vincita Potenziale: {vincita_singola}€"):
                 col1, col2, col3, col4 = st.columns(4)
-                col1.write(f"@{r['Quota']} | {r['Stake']}€\n{r['Bookmaker']}")
-                # Chiavi uniche anche per i tasti esito
+                col1.write(f"**{r['Scelta']}** @{r['Quota']}\nStake: {r['Stake']}€\nRet: **{vincita_singola}€**")
+                
                 if col2.button("✅ VINTO", key=f"win_cloud_{i}"):
                     df_c.at[i, 'Esito'] = "VINTO"
                     df_c.at[i, 'Profitto'] = round((r['Stake']*r['Quota'])-r['Stake'], 2)
-                    conn.update(worksheet="Giocate", data=df_c); st.rerun()
+                    conn.update(worksheet="Giocate", data=df_c)
+                    st.rerun()
                 if col3.button("❌ PERSO", key=f"loss_cloud_{i}"):
                     df_c.at[i, 'Esito'] = "PERSO"
                     df_c.at[i, 'Profitto'] = -r['Stake']
-                    conn.update(worksheet="Giocate", data=df_c); st.rerun()
+                    conn.update(worksheet="Giocate", data=df_c)
+                    st.rerun()
                 if col4.button("🗑️", key=f"del_cloud_{i}"):
                     df_c = df_c.drop(i)
-                    conn.update(worksheet="Giocate", data=df_c); st.rerun()
+                    conn.update(worksheet="Giocate", data=df_c)
+                    st.rerun()
     else:
         st.info("Portafoglio vuoto su Google Sheets.")
 
 with t3:
-    st.subheader("📊 Bilancio")
+    st.subheader("📊 Analisi Profitti")
     df_c = carica_db()
     if not df_c.empty:
-        prof = df_c['Profitto'].sum()
-        st.metric("Profitto Netto", f"{round(prof, 2)} €")
+        prof_netto = df_c['Profitto'].sum()
+        m1, m2 = st.columns(2)
+        m1.metric("Profitto Netto Attuale", f"{round(prof_netto, 2)} €")
+        m2.metric("Mancante al Target (5.000€)", f"{round(5000 - prof_netto, 2)} €")
+        
+        st.divider()
+        st.write("### Registro Completo Operazioni")
         st.dataframe(df_c, use_container_width=True)

@@ -5,7 +5,7 @@ from datetime import datetime
 from streamlit_gsheets import GSheetsConnection
 
 # --- CONFIGURAZIONE ---
-st.set_page_config(page_title="AI SNIPER V11.11 - Professional", layout="wide")
+st.set_page_config(page_title="AI SNIPER V11.12", layout="wide")
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 API_KEY = '01f1c8f2a314814b17de03eeb6c53623'
@@ -41,7 +41,7 @@ def calc_stake(prob, quota, budget, frazione):
     return round(max(2.0, min(importo, budget * 0.1)), 2)
 
 # --- INTERFACCIA ---
-st.title("🎯 AI SNIPER V11.11")
+st.title("🎯 AI SNIPER V11.12")
 
 t1, t2, t3 = st.tabs(["🔍 SCANNER VALORE", "💼 PORTAFOGLIO", "📊 FISCALE"])
 
@@ -63,7 +63,14 @@ with t1:
     if st.button("🚀 AVVIA SCANSIONE"):
         res = requests.get(f'https://api.the-odds-api.com/v4/sports/{leagues[sel_league]}/odds/', 
                            params={'api_key': API_KEY, 'regions': 'eu', 'markets': 'totals'})
-        if res.status_code == 200: st.session_state['api_data'] = res.json()
+        if res.status_code == 200: 
+            st.session_state['api_data'] = res.json()
+            st.session_state['api_rem'] = res.headers.get('x-requests-remaining')
+        else:
+            st.error("Errore API: Controlla la tua chiave o il limite.")
+
+    if 'api_rem' in st.session_state:
+        st.write(f"💳 **Credito Residuo API:** {st.session_state['api_rem']}")
 
     if st.session_state.get('api_data'):
         for m in st.session_state['api_data']:
@@ -76,60 +83,56 @@ with t1:
                     q_ov = next((o['price'] for o in mk['outcomes'] if o['name'] == 'Over' and o['point'] == 2.5), 1.0)
                     q_un = next((o['price'] for o in mk['outcomes'] if o['name'] == 'Under' and o['point'] == 2.5), 1.0)
                     p_ov_e, p_un_e = get_totals_value(q_ov, q_un)
-                    
-                    # Calcolo valore reale (aggiungiamo margine stimato del robot)
                     best = {"T": "OVER 2.5", "Q": q_ov, "P": p_ov_e + 0.06} if q_ov > q_un else {"T": "UNDER 2.5", "Q": q_un, "P": p_un_e + 0.06}
                     valore_perc = round(((best['P'] * best['Q']) - 1) * 100, 2)
                     
                     if valore_perc/100 > soglia_val:
                         stake = calc_stake(best['P'], best['Q'], budget_cassa, rischio)
                         poss_v = round(stake * best['Q'], 2)
-                        
                         col1, col2, col3 = st.columns([3, 2, 1])
-                        col1.write(f"📅 {date_m}\n**{home}-{away}**\nBK: {get_bk_link(bk['title'])}")
-                        col2.warning(f"🎯 {best['T']} @{best['Q']}\n💎 Valore: **+{valore_perc}%**")
-                        col2.write(f"💰 Stake: {stake}€ | 💸 Vincita: **{poss_v}€**")
-                        
+                        col1.write(f"📅 **{date_m}**\n**{home}-{away}**\nBK: {get_bk_link(bk['title'])}")
+                        col2.warning(f"🎯 {best['T']} @{best['Q']} | 💎 **+{valore_perc}%**")
+                        col2.write(f"Stake: **{stake}€** | Vincita: **{poss_v}€**")
                         u_key = f"add_{home}_{date_m}_{best['Q']}".replace(" ", "_")
-                        if col3.button("AGGIUNGI", key=u_key):
+                        if col3.button("ADD", key=u_key):
                             nuova = {"Data Match": date_m, "Match": f"{home}-{away}", "Scelta": best['T'], "Quota": best['Q'], "Stake": stake, "Bookmaker": bk['title'], "Esito": "Pendente", "Profitto": 0.0, "Sport_Key": leagues[sel_league]}
                             salva_db(pd.concat([carica_db(), pd.DataFrame([nuova])], ignore_index=True))
-                            st.toast("✅ Sincronizzato!")
+                            st.toast("Aggiunto!")
 
 with t2:
     st.subheader("💼 Portafoglio Cloud")
     df_p = carica_db()
     pendenti = df_p[df_p['Esito'] == "Pendente"]
     
-    c_p1, c_p2 = st.columns(2)
-    c_p1.metric("Totale Scommesso", f"{round(pendenti['Stake'].sum(), 2)} €")
-    c_p2.metric("Ritorno Potenziale", f"{round((pendenti['Stake'] * pendenti['Quota']).sum(), 2)} €")
-    
+    col_m1, col_m2 = st.columns(2)
+    col_m1.metric("Esposizione Attuale", f"{round(pendenti['Stake'].sum(), 2)} €")
+    col_m2.metric("Ritorno Atteso", f"{round((pendenti['Stake'] * pendenti['Quota']).sum(), 2)} €")
     st.write("---")
+    
     for i, r in pendenti.iterrows():
         vinc_pot = round(r['Stake'] * r['Quota'], 2)
         with st.container():
             col_a, col_b, col_c = st.columns([3, 2, 1])
-            col_a.write(f"⏳ **{r['Match']}**\n{r['Scelta']} @{r['Quota']} ({r['Bookmaker']})")
-            col_b.write(f"Scommesso: **{r['Stake']}€**\nPotenziale: **{vinc_pot}€**")
+            col_a.write(f"📅 {r['Data Match']}\n**{r['Match']}**\n{r['Scelta']} @{r['Quota']} ({r['Bookmaker']})")
+            col_b.write(f"Puntati: **{r['Stake']}€**\nVincita: **{vinc_pot}€**")
             if col_c.button("🗑️", key=f"del_p_{i}"):
                 salva_db(df_p.drop(i)); st.rerun()
             st.divider()
 
 with t3:
-    st.subheader("📊 Storico & Target 5k")
+    st.subheader("📊 Fiscale & Obiettivi")
     df_f = carica_db()
     if not df_f.empty:
         prof_netto = round(df_f['Profitto'].sum(), 2)
         vinti = df_f[df_f['Esito'] == "VINTO"]
         tot_vinto_lordo = round((vinti['Stake'] * vinti['Quota']).sum(), 2)
         
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Profitto Netto", f"{prof_netto} €")
-        m2.metric("Totale Incassato", f"{tot_vinto_lordo} €")
-        m3.metric("Mancante a Target", f"{round(5000-prof_netto, 2)} €")
+        c_m1, c_m2, c_m3 = st.columns(3)
+        c_m1.metric("Profitto Netto", f"{prof_netto} €")
+        c_m2.metric("Totale Incassato", f"{tot_vinto_lordo} €")
+        c_m3.metric("Mancante a 5k", f"{round(5000-prof_netto, 2)} €")
         
-        st.write("### 📜 Dettaglio")
+        st.write("### 📜 Storico Completo")
         for i, row in df_f.iterrows():
-            pallino = "🟢" if row['Esito'] == "VINTO" else "🔴" if row['Esito'] == "PERSO" else "⏳"
-            st.write(f"{pallino} **{row['Match']}**: {row['Profitto']}€ (Scommesso: {row['Stake']}€ | Quota: {row['Quota']})")
+            status = "🟢" if row['Esito'] == "VINTO" else "🔴" if row['Esito'] == "PERSO" else "⏳"
+            st.write(f"{status} **{row['Match']}** ({row['Data Match']}): {row['Profitto']}€")

@@ -4,10 +4,9 @@ import requests
 from datetime import datetime
 from streamlit_gsheets import GSheetsConnection
 
-# --- CONFIGURAZIONE E MEMORIA ---
-st.set_page_config(page_title="AI SNIPER V11.1 - Cloud Sync", layout="wide")
+# --- CONFIGURAZIONE ---
+st.set_page_config(page_title="AI SNIPER V11.2 - Fix Keys", layout="wide")
 
-# Connessione Google Sheets
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def carica_db():
@@ -22,7 +21,6 @@ def salva_giocata(nuova_giocata):
     df_finale = pd.concat([df_attuale, pd.DataFrame([nuova_giocata])], ignore_index=True)
     conn.update(worksheet="Giocate", data=df_finale)
 
-# Funzioni tecniche
 def get_totals_value(q_over, q_under):
     margin = (1/q_over) + (1/q_under)
     return (1/q_over) / margin, (1/q_under) / margin
@@ -33,7 +31,6 @@ def calc_stake(prob, quota, budget, frazione):
     importo = budget * (valore / (quota - 1)) * frazione
     return round(max(2.0, min(importo, budget * 0.1)), 2)
 
-# --- CALLBACKS ---
 def aggiungi_a_cloud(match, scelta, quota, stake, book, data):
     giocata = {
         "Data Match": data, "Match": match, "Scelta": scelta,
@@ -44,7 +41,7 @@ def aggiungi_a_cloud(match, scelta, quota, stake, book, data):
     st.toast(f"✅ Sincronizzato Cloud: {match}")
 
 # --- INTERFACCIA ---
-st.title("🎯 AI SNIPER V11.1 - Cloud Sync")
+st.title("🎯 AI SNIPER V11.2")
 
 if 'ultimi_risultati' not in st.session_state:
     st.session_state['ultimi_risultati'] = []
@@ -103,13 +100,15 @@ with t1:
                         c1, c2, c3 = st.columns([3, 2, 1])
                         c1.write(f"📅 {date_m}\n**{home}-{away}**")
                         c2.write(f"🎯 {best['T']} @{best['Q']} ({best_bk['title']})\n💰 Stake: {stake}€")
-                        c3.button("AGGIUNGI", key=f"btn_{home}_{best['T']}", 
-                                  on_click=aggiungi_a_cloud, 
+                        
+                        # CHIAVE UNICA GENERATA QUI
+                        u_key = f"btn_{home}_{away}_{best['T']}_{best_bk['title']}_{date_m}".replace(" ", "_")
+                        c3.button("AGGIUNGI", key=u_key, on_click=aggiungi_a_cloud, 
                                   args=(f"{home}-{away}", best['T'], best['Q'], stake, best_bk['title'], date_m))
                         st.divider()
 
 with t2:
-    st.subheader("💼 Portafoglio Sincronizzato")
+    st.subheader("💼 Portafoglio Cloud")
     df_c = carica_db()
     if not df_c.empty:
         pendenti = df_c[df_c['Esito'] == "Pendente"]
@@ -118,26 +117,25 @@ with t2:
             with st.expander(f"📌 {r['Match']} - {r['Scelta']}"):
                 col1, col2, col3, col4 = st.columns(4)
                 col1.write(f"@{r['Quota']} | {r['Stake']}€\n{r['Bookmaker']}")
-                if col2.button("✅ VINTO", key=f"w_{i}"):
+                # Chiavi uniche anche per i tasti esito
+                if col2.button("✅ VINTO", key=f"win_cloud_{i}"):
                     df_c.at[i, 'Esito'] = "VINTO"
                     df_c.at[i, 'Profitto'] = round((r['Stake']*r['Quota'])-r['Stake'], 2)
                     conn.update(worksheet="Giocate", data=df_c); st.rerun()
-                if col3.button("❌ PERSO", key=f"l_{i}"):
+                if col3.button("❌ PERSO", key=f"loss_cloud_{i}"):
                     df_c.at[i, 'Esito'] = "PERSO"
                     df_c.at[i, 'Profitto'] = -r['Stake']
                     conn.update(worksheet="Giocate", data=df_c); st.rerun()
-                if col4.button("🗑️", key=f"d_{i}"):
+                if col4.button("🗑️", key=f"del_cloud_{i}"):
                     df_c = df_c.drop(i)
                     conn.update(worksheet="Giocate", data=df_c); st.rerun()
     else:
         st.info("Portafoglio vuoto su Google Sheets.")
 
 with t3:
-    st.subheader("📊 Bilancio Strategico")
+    st.subheader("📊 Bilancio")
     df_c = carica_db()
     if not df_c.empty:
         prof = df_c['Profitto'].sum()
-        m1, m2 = st.columns(2)
-        m1.metric("Profitto Netto", f"{round(prof, 2)} €")
-        m2.metric("Mancante a 5.000€", f"{round(5000 - prof, 2)} €")
+        st.metric("Profitto Netto", f"{round(prof, 2)} €")
         st.dataframe(df_c, use_container_width=True)

@@ -3,3 +3,6 @@ streamlit>=1.31.0
 scipy
 requests
 altair>=5.0.0
+st-gsheets-connection
+pandas
+requests

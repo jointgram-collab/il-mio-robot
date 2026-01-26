@@ -4,8 +4,8 @@ import requests
 from datetime import datetime, date
 from streamlit_gsheets import GSheetsConnection
 
-# --- CONFIGURAZIONE ---
-st.set_page_config(page_title="AI SNIPER V11.25 - Stable Analytics", layout="wide")
+# --- CONFIGURAZIONE UI ---
+st.set_page_config(page_title="AI SNIPER V11.26 - Ultimate", layout="wide")
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 API_KEY = '01f1c8f2a314814b17de03eeb6c53623'
@@ -18,21 +18,16 @@ BK_EURO_AUTH = {
     "William Hill": "https://www.williamhill.it", "888sport": "https://www.888sport.it"
 }
 
-# --- FUNZIONI DATABASE ---
+# --- MOTORE DATABASE ---
 def carica_db():
     try:
         df = conn.read(worksheet="Giocate", ttl=0)
         if df is None or df.empty:
             return pd.DataFrame(columns=["Data Match", "Match", "Scelta", "Quota", "Stake", "Bookmaker", "Esito", "Profitto", "Sport_Key", "Risultato"])
-        
         df = df.dropna(subset=["Match"])
-        # Conversione robusta della data: GG/MM HH:MM -> Datetime
         def parse_dt(x):
-            try:
-                return datetime.strptime(f"{x}/{date.today().year}", "%d/%m/%Y %H:%M")
-            except:
-                return None
-        
+            try: return datetime.strptime(f"{x}/{date.today().year}", "%d/%m %Y:%M")
+            except: return None
         df['dt_obj'] = df['Data Match'].apply(parse_dt)
         return df
     except:
@@ -43,67 +38,112 @@ def salva_db(df):
     conn.update(worksheet="Giocate", data=df)
     st.cache_data.clear()
 
+# --- LOGICA CALCOLI ---
+def get_totals_value(q_over, q_under):
+    margin = (1/q_over) + (1/q_under)
+    return (1/q_over) / margin, (1/q_under) / margin
+
+def calc_stake(prob, quota, budget, frazione):
+    valore = (prob * quota) - 1
+    if valore <= 0: return 2.0
+    importo = budget * (valore / (quota - 1)) * frazione
+    return round(max(2.0, min(importo, budget * 0.15)), 2)
+
+# --- AUTO-CHECK ---
+def check_results():
+    df = carica_db()
+    pendenti = df[df['Esito'] == "Pendente"]
+    if pendenti.empty: return
+    cambiamenti = False
+    with st.spinner("🔄 Verifica risultati in corso..."):
+        for skey in pendenti['Sport_Key'].unique():
+            res = requests.get(f'https://api.the-odds-api.com/v4/sports/{skey}/scores/', params={'api_key': API_KEY, 'daysFrom': 3})
+            if res.status_code == 200:
+                scores = res.json()
+                for i, r in pendenti[pendenti['Sport_Key'] == skey].iterrows():
+                    m_res = next((m for m in scores if f"{m['home_team']}-{m['away_team']}" == r['Match'] and m.get('completed')), None)
+                    if m_res and m_res.get('scores'):
+                        s = m_res['scores']
+                        score_str = f"{s[0]['score']}-{s[1]['score']}"
+                        goals = sum(int(x['score']) for x in s)
+                        vinto = (r['Scelta'] == "OVER 2.5" and goals > 2.5) or (r['Scelta'] == "UNDER 2.5" and goals < 2.5)
+                        df.at[i, 'Esito'] = "VINTO" if vinto else "PERSO"
+                        df.at[i, 'Risultato'] = score_str
+                        df.at[i, 'Profitto'] = round((r['Stake']*r['Quota'])-r['Stake'], 2) if vinto else -r['Stake']
+                        cambiamenti = True
+    if cambiamenti: salva_db(df); st.rerun()
+
 # --- INTERFACCIA ---
-st.title("🎯 AI SNIPER V11.25")
+st.title("🎯 AI SNIPER V11.26")
+if 'api_data' not in st.session_state: st.session_state['api_data'] = []
 
 t1, t2, t3 = st.tabs(["🔍 SCANNER", "💼 PORTAFOGLIO", "📊 FISCALE"])
 
-# [Tab 1 e Tab 2 - Logica standard V11.23...]
-# (Ometto per brevità ma il codice è pronto per l'esecuzione)
+with t1:
+    with st.sidebar:
+        st.header("⚙️ Parametri")
+        budget_cassa = st.number_input("Budget (€)", value=250.0)
+        rischio = st.slider("Kelly", 0.05, 0.50, 0.20)
+        soglia_val = st.slider("Valore Min %", 0, 15, 5) / 100
+    
+    leagues = {"SERIE A": "soccer_italy_serie_a", "PREMIER": "soccer_england_league_1", "CHAMPIONS": "soccer_uefa_champions_league"}
+    sel_league = st.selectbox("Campionato:", list(leagues.keys()))
+    
+    if st.button("🚀 SCANSIONA"):
+        res = requests.get(f'https://api.the-odds-api.com/v4/sports/{leagues[sel_league]}/odds/', params={'api_key': API_KEY, 'regions': 'eu', 'markets': 'totals'})
+        if res.status_code == 200: st.session_state['api_data'] = res.json()
+
+    if st.session_state['api_data']:
+        for m in st.session_state['api_data']:
+            try:
+                date_m = datetime.strptime(m['commence_time'], "%Y-%m-%dT%H:%M:%SZ").strftime("%d/%m %H:%M")
+                opts = []
+                for b in m.get('bookmakers', []):
+                    if b['title'] in BK_EURO_AUTH:
+                        mk = next((x for x in b['markets'] if x['key'] == 'totals'), None)
+                        if mk:
+                            q_ov = next((o['price'] for o in mk['outcomes'] if o['name'] == 'Over' and o['point'] == 2.5), None)
+                            q_un = next((o['price'] for o in mk['outcomes'] if o['name'] == 'Under' and o['point'] == 2.5), None)
+                            if q_ov and q_un:
+                                p_ov, p_un = get_totals_value(q_ov, q_un)
+                                opts.append({"T": "OVER 2.5", "Q": q_ov, "P": p_ov+0.06, "BK": b['title']})
+                                opts.append({"T": "UNDER 2.5", "Q": q_un, "P": p_un+0.06, "BK": b['title']})
+                if opts:
+                    best = max(opts, key=lambda x: (x['P'] * x['Q']) - 1)
+                    val = round(((best['P'] * best['Q']) - 1) * 100, 2)
+                    if val/100 > soglia_val:
+                        st.write(f"📅 {date_m} | **{m['home_team']}-{m['away_team']}** | {best['BK']}")
+                        if st.button(f"ADD {best['T']} @{best['Q']} (+{val}%)", key=f"add_{m['home_team']}_{best['BK']}"):
+                            n = {"Data Match": date_m, "Match": f"{m['home_team']}-{m['away_team']}", "Scelta": best['T'], "Quota": best['Q'], "Stake": calc_stake(best['P'], best['Q'], budget_cassa, rischio), "Bookmaker": best['BK'], "Esito": "Pendente", "Profitto": 0.0, "Sport_Key": leagues[sel_league], "Risultato": "-"}
+                            salva_db(pd.concat([carica_db(), pd.DataFrame([n])], ignore_index=True))
+                            st.toast("Aggiunto!")
+            except: continue
+
+with t2:
+    st.subheader("💼 Portafoglio")
+    if st.button("🔄 AUTO-CHECK RISULTATI"): check_results()
+    df_p = carica_db()
+    pend = df_p[df_p['Esito'] == "Pendente"]
+    st.metric("Capitale Esposto", f"{round(pend['Stake'].sum(), 2)} €")
+    for i, r in pend.iterrows():
+        c1, c2 = st.columns([4, 1])
+        c1.write(f"**{r['Match']}** - {r['Scelta']} @{r['Quota']} ({r['Stake']}€)")
+        if c2.button("🗑️", key=f"del_{i}"): salva_db(df_p.drop(i)); st.rerun()
 
 with t3:
-    st.subheader("📊 Analisi Performance & Filtri")
+    st.subheader("📊 Fiscale & Filtri")
     df_f = carica_db()
-    
     if not df_f.empty:
-        # Pulizia righe con date non valide per il filtro
-        df_valido = df_f.dropna(subset=['dt_obj'])
-        
-        # UI Filtro Date
-        col_d1, col_d2 = st.columns([2, 2])
-        start_def = df_valido['dt_obj'].min().date() if not df_valido.empty else date.today()
-        
-        # Usiamo un try-except per il date_input per evitare crash su selezioni parziali
-        try:
-            selected_range = col_d1.date_input("Range Temporale", [start_def, date.today()])
+        df_v = df_f.dropna(subset=['dt_obj'])
+        s_range = st.date_input("Range:", [df_v['dt_obj'].min().date() if not df_v.empty else date.today(), date.today()])
+        if len(s_range) == 2:
+            df_fil = df_f[(df_f['dt_obj'].dt.date >= s_range[0]) & (df_f['dt_obj'].dt.date <= s_range[1])]
+            conc = df_fil[df_fil['Esito'] != "Pendente"]
+            scomm = round(conc['Stake'].sum(), 2)
+            vinto = round(conc[conc['Esito']=="VINTO"]['Profitto'].sum() + conc[conc['Esito']=="VINTO"]['Stake'].sum(), 2)
             
-            if len(selected_range) == 2:
-                d_inizio, d_fine = selected_range
-                # Filtraggio sicuro convertendo tutto a datetime64[ns]
-                df_filtrato = df_f[
-                    (df_f['dt_obj'].dt.date >= d_inizio) & 
-                    (df_f['dt_obj'].dt.date <= d_fine)
-                ]
-            else:
-                df_filtrato = df_f
-        except:
-            df_filtrato = df_f
-
-        # --- CALCOLI FISCALI ---
-        concluse = df_filtrato[df_filtrato['Esito'] != "Pendente"]
-        tot_scommesso = round(concluse['Stake'].sum(), 2)
-        vincite_lorde = concluse[concluse['Esito'] == "VINTO"]['Profitto'].sum() + \
-                        concluse[concluse['Esito'] == "VINTO"]['Stake'].sum()
-        tot_vinto = round(vincite_lorde, 2)
-        profitto_netto = round(concluse['Profitto'].sum(), 2)
-        
-        # Metriche Professionali
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Volume Scommesso", f"{tot_scommesso} €")
-        m2.metric("Totale Rientrato", f"{tot_vinto} €")
-        m3.metric("Profitto Netto", f"{profitto_netto} €", delta=f"{profitto_netto}€")
-        
-        # Calcolo Quota Media (Richiesta bonus)
-        q_media = round(concluse['Quota'].mean(), 2) if not concluse.empty else 0
-        m4.metric("Quota Media", f"{q_media}")
-
-        st.divider()
-        
-        # Visualizzazione Tabella
-        st.dataframe(df_filtrato.drop(columns=['dt_obj']).sort_index(ascending=False), use_container_width=True)
-        
-        # Export
-        csv = df_filtrato.to_csv(index=False).encode('utf-8')
-        st.download_button("📥 Esporta in CSV", data=csv, file_name=f"report_sniper_{date.today()}.csv")
-    else:
-        st.info("Database pronto. Inizia a inserire le scommesse nello Scanner!")
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Scommesso", f"{scomm} €")
+            c2.metric("Rientrato", f"{vinto} €")
+            c3.metric("Netto", f"{round(vinto-scomm, 2)} €")
+            st.dataframe(df_fil.drop(columns=['dt_obj']).sort_index(ascending=False))

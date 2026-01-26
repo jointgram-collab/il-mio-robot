@@ -5,7 +5,7 @@ from datetime import datetime, date, timedelta
 from streamlit_gsheets import GSheetsConnection
 
 # --- CONFIGURAZIONE UI ---
-st.set_page_config(page_title="AI SNIPER V11.40 - Safe-Deposit", layout="wide")
+st.set_page_config(page_title="AI SNIPER V11.42 - Anti-Block & Premier Fix", layout="wide")
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 API_KEY = '01f1c8f2a314814b17de03eeb6c53623'
@@ -14,7 +14,7 @@ TARGET_FINALE = 5000.0
 LEAGUE_NAMES = {
     "soccer_italy_serie_a": "🇮🇹 Serie A",
     "soccer_italy_serie_b": "🇮🇹 Serie B",
-    "soccer_england_premier_league": "🏴󠁧󠁢󠁥󠁮󠁧󠁿 Premier League", # CHIAVE CORRETTA
+    "soccer_england_premier_league": "🏴󠁧󠁢󠁥󠁮󠁧󠁿 Premier League",
     "soccer_spain_la_liga": "🇪🇸 La Liga",
     "soccer_germany_bundesliga": "🇩🇪 Bundesliga",
     "soccer_uefa_champions_league": "🇪🇺 Champions",
@@ -24,7 +24,8 @@ LEAGUE_NAMES = {
 
 BK_EURO_AUTH = ["Bet365", "Snai", "Better", "Planetwin365", "Eurobet", "Goldbet", "Sisal", "Bwin", "888sport"]
 
-# --- MOTORE DATABASE CON BACKUP ---
+# --- MOTORE DATABASE CON CACHE (RISOLVE ERRORE 429) ---
+@st.cache_data(ttl=10)
 def carica_db():
     try:
         df = conn.read(worksheet="Giocate", ttl=0)
@@ -34,20 +35,22 @@ def carica_db():
         df['dt_obj'] = pd.to_datetime(df['Data Match'] + f"/{date.today().year}", format="%d/%m %H:%M/%Y", errors='coerce')
         return df
     except Exception as e:
-        st.error(f"Errore caricamento database: {e}")
+        st.warning("⚠️ Limite Google raggiunto. Attendi 10 secondi...")
         return pd.DataFrame(columns=["Data Match", "Match", "Scelta", "Quota", "Stake", "Bookmaker", "Esito", "Profitto", "Sport_Key", "Risultato"])
 
 def salva_db(df):
     if 'dt_obj' in df.columns: df = df.drop(columns=['dt_obj'])
     conn.update(worksheet="Giocate", data=df)
-    st.cache_data.clear()
+    st.cache_data.clear() # Svuota la cache dopo il salvataggio
+    st.toast("✅ Cloud Sincronizzato!")
 
+# --- AGGIORNAMENTO AUTOMATICO RISULTATI ---
 def check_results():
     df = carica_db()
     pendenti = df[df['Esito'] == "Pendente"]
     if pendenti.empty: return
     cambiamenti = False
-    with st.spinner("🔄 Sincronizzazione risultati in corso..."):
+    with st.spinner("🔄 Verifica risultati..."):
         for skey in pendenti['Sport_Key'].unique():
             res = requests.get(f'https://api.the-odds-api.com/v4/sports/{skey}/scores/', params={'api_key': API_KEY, 'daysFrom': 3})
             if res.status_code == 200:
@@ -66,12 +69,11 @@ def check_results():
     if cambiamenti: salva_db(df); st.rerun()
 
 # --- INTERFACCIA ---
-st.title("🎯 AI SNIPER V11.40")
+st.title("🎯 AI SNIPER V11.42")
 if 'api_data' not in st.session_state: st.session_state['api_data'] = []
 
 t1, t2, t3 = st.tabs(["🔍 SCANNER", "💼 PORTAFOGLIO", "📊 FISCALE"])
 
-# --- TAB 1: SCANNER ---
 with t1:
     df_tot = carica_db()
     match_pendenti = df_tot[df_tot['Esito'] == "Pendente"]['Match'].tolist() if not df_tot.empty else []
@@ -82,7 +84,7 @@ with t1:
         rischio = st.slider("Kelly", 0.05, 0.50, 0.20)
         soglia_val = st.slider("Valore Min %", 0, 15, 5) / 100
         st.divider()
-        st.header("📈 Obiettivo Settimana")
+        st.header("📈 Obiettivo Settimanale")
         target_sett = st.number_input("Match Target", value=10)
         today = date.today()
         start_week = today - timedelta(days=today.weekday())
@@ -94,8 +96,12 @@ with t1:
     sel_name = st.selectbox("Campionato:", list(leagues.keys()))
     
     if st.button("🚀 SCANSIONA"):
-        res = requests.get(f'https://api.the-odds-api.com/v4/sports/{leagues[sel_name]}/odds/', params={'api_key': API_KEY, 'regions': 'eu', 'markets': 'totals'})
-        if res.status_code == 200: st.session_state['api_data'] = res.json()
+        with st.spinner(f"Ricerca in {sel_name}..."):
+            res = requests.get(f'https://api.the-odds-api.com/v4/sports/{leagues[sel_name]}/odds/', params={'api_key': API_KEY, 'regions': 'eu', 'markets': 'totals'})
+            if res.status_code == 200:
+                st.session_state['api_data'] = res.json()
+                if not st.session_state['api_data']: st.warning("Nessun match trovato per i parametri scelti.")
+            else: st.error("Errore API. Controlla la tua quota o connessione.")
 
     if st.session_state['api_data']:
         for m in st.session_state['api_data']:
@@ -133,7 +139,6 @@ with t1:
                         st.divider()
             except: continue
 
-# --- TAB 2: PORTAFOGLIO ---
 with t2:
     st.subheader("💼 Portafoglio")
     df_p = carica_db()
@@ -157,29 +162,27 @@ with t2:
             salva_db(df_p.drop(i)); st.rerun()
         st.divider()
 
-# --- TAB 3: FISCALE & BACKUP ---
 with t3:
-    st.subheader("📊 Analisi Fiscale & Sicurezza")
+    st.subheader("📊 Analisi Fiscale")
     df_f = carica_db()
-    
     if not df_f.empty:
-        # 1. Goal Tracker
-        profitto_netto = round((df_f[df_f['Esito'] == "VINTO"]['Profitto'].sum() + df_f[df_f['Esito'] == "VINTO"]['Stake'].sum()) - df_f['Stake'].sum(), 2)
-        st.info(f"🏆 **Goal: {TARGET_FINALE}€** | Attuale: **{profitto_netto}€** | Mancano: **{round(TARGET_FINALE - profitto_netto, 2)}€**")
-        st.progress(min(1.0, max(0.0, profitto_netto / TARGET_FINALE)))
+        # Calcoli Goal Tracker
+        tot_speso = round(df_f['Stake'].sum(), 2)
+        tot_vinto = round(df_f[df_f['Esito'] == "VINTO"]['Profitto'].sum() + df_f[df_f['Esito'] == "VINTO"]['Stake'].sum(), 2)
+        netto = round(tot_vinto - tot_speso, 2)
         
-        # 2. Pulsante Manuale di Backup (Salvataggio Locale)
+        st.info(f"🏆 **Goal: {TARGET_FINALE}€** | Attuale: **{netto}€** | Mancano: **{round(TARGET_FINALE - netto, 2)}€**")
+        st.progress(min(1.0, max(0.0, netto / TARGET_FINALE)))
+        
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Speso", f"{tot_speso} €")
+        m2.metric("Vinto", f"{tot_vinto} €")
+        m3.metric("Netto", f"{netto} €", delta=f"{netto}€")
+        
         csv = df_f.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="📥 SCARICA BACKUP DI SICUREZZA (CSV)",
-            data=csv,
-            file_name=f"ai_sniper_backup_{date.today().strftime('%Y%m%d')}.csv",
-            mime='text/csv',
-            use_container_width=True
-        )
-        
+        st.download_button("📥 BACKUP CSV", data=csv, file_name="sniper_backup.csv", mime='text/csv')
         st.divider()
-        # 3. Storico
+
         df_valid = df_f.dropna(subset=['dt_obj'])
         s_range = st.date_input("Periodo:", [df_valid['dt_obj'].min().date() if not df_valid.empty else date.today(), date.today()])
         if len(s_range) == 2:

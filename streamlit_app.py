@@ -12,10 +12,14 @@ API_KEY = '01f1c8f2a314814b17de03eeb6c53623'
 TARGET_FINALE = 5000.0
 
 LEAGUE_NAMES = {
-    "soccer_italy_serie_a": "🇮🇹 Serie A", "soccer_italy_serie_b": "🇮🇹 Serie B",
-    "soccer_england_league_1": "🏴󠁧󠁢󠁥󠁮󠁧󠁿 Premier League", "soccer_spain_la_liga": "🇪🇸 La Liga",
-    "soccer_germany_bundesliga": "🇩🇪 Bundesliga", "soccer_uefa_champions_league": "🇪🇺 Champions",
-    "soccer_uefa_europa_league": "🇪🇺 Europa League", "soccer_france_ligue_1": "🇫🇷 Ligue 1"
+    "soccer_italy_serie_a": "🇮🇹 Serie A",
+    "soccer_italy_serie_b": "🇮🇹 Serie B",
+    "soccer_england_premier_league": "🏴󠁧󠁢󠁥󠁮󠁧󠁿 Premier League", # CHIAVE CORRETTA
+    "soccer_spain_la_liga": "🇪🇸 La Liga",
+    "soccer_germany_bundesliga": "🇩🇪 Bundesliga",
+    "soccer_uefa_champions_league": "🇪🇺 Champions",
+    "soccer_uefa_europa_league": "🇪🇺 Europa League",
+    "soccer_france_ligue_1": "🇫🇷 Ligue 1"
 }
 
 BK_EURO_AUTH = ["Bet365", "Snai", "Better", "Planetwin365", "Eurobet", "Goldbet", "Sisal", "Bwin", "888sport"]

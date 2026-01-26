@@ -5,7 +5,7 @@ from datetime import datetime, date
 from streamlit_gsheets import GSheetsConnection
 
 # --- CONFIGURAZIONE UI ---
-st.set_page_config(page_title="AI SNIPER V11.26 - Ultimate", layout="wide")
+st.set_page_config(page_title="AI SNIPER V11.27 - Bulletproof", layout="wide")
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 API_KEY = '01f1c8f2a314814b17de03eeb6c53623'
@@ -24,11 +24,11 @@ def carica_db():
         df = conn.read(worksheet="Giocate", ttl=0)
         if df is None or df.empty:
             return pd.DataFrame(columns=["Data Match", "Match", "Scelta", "Quota", "Stake", "Bookmaker", "Esito", "Profitto", "Sport_Key", "Risultato"])
+        
         df = df.dropna(subset=["Match"])
-        def parse_dt(x):
-            try: return datetime.strptime(f"{x}/{date.today().year}", "%d/%m %Y:%M")
-            except: return None
-        df['dt_obj'] = df['Data Match'].apply(parse_dt)
+        
+        # Conversione sicura delle date
+        df['dt_obj'] = pd.to_datetime(df['Data Match'] + f"/{date.today().year}", format="%d/%m %H:%M/%Y", errors='coerce')
         return df
     except:
         return pd.DataFrame(columns=["Data Match", "Match", "Scelta", "Quota", "Stake", "Bookmaker", "Esito", "Profitto", "Sport_Key", "Risultato"])
@@ -55,7 +55,7 @@ def check_results():
     pendenti = df[df['Esito'] == "Pendente"]
     if pendenti.empty: return
     cambiamenti = False
-    with st.spinner("🔄 Verifica risultati in corso..."):
+    with st.spinner("🔄 Verifica risultati..."):
         for skey in pendenti['Sport_Key'].unique():
             res = requests.get(f'https://api.the-odds-api.com/v4/sports/{skey}/scores/', params={'api_key': API_KEY, 'daysFrom': 3})
             if res.status_code == 200:
@@ -74,7 +74,7 @@ def check_results():
     if cambiamenti: salva_db(df); st.rerun()
 
 # --- INTERFACCIA ---
-st.title("🎯 AI SNIPER V11.26")
+st.title("🎯 AI SNIPER V11.27")
 if 'api_data' not in st.session_state: st.session_state['api_data'] = []
 
 t1, t2, t3 = st.tabs(["🔍 SCANNER", "💼 PORTAFOGLIO", "📊 FISCALE"])
@@ -86,7 +86,11 @@ with t1:
         rischio = st.slider("Kelly", 0.05, 0.50, 0.20)
         soglia_val = st.slider("Valore Min %", 0, 15, 5) / 100
     
-    leagues = {"SERIE A": "soccer_italy_serie_a", "PREMIER": "soccer_england_league_1", "CHAMPIONS": "soccer_uefa_champions_league"}
+    leagues = {
+        "ITALIA: Serie A": "soccer_italy_serie_a",
+        "UK: Premier League": "soccer_england_league_1",
+        "EUROPA: Champions": "soccer_uefa_champions_league"
+    }
     sel_league = st.selectbox("Campionato:", list(leagues.keys()))
     
     if st.button("🚀 SCANSIONA"):
@@ -133,17 +137,25 @@ with t2:
 with t3:
     st.subheader("📊 Fiscale & Filtri")
     df_f = carica_db()
-    if not df_f.empty:
-        df_v = df_f.dropna(subset=['dt_obj'])
-        s_range = st.date_input("Range:", [df_v['dt_obj'].min().date() if not df_v.empty else date.today(), date.today()])
+    if not df_f.empty and 'dt_obj' in df_f.columns:
+        # Pulizia rigorosa per il filtro
+        df_valid = df_f.dropna(subset=['dt_obj'])
+        
+        start_date = df_valid['dt_obj'].min().date() if not df_valid.empty else date.today()
+        s_range = st.date_input("Range Temporale:", [start_date, date.today()])
+        
         if len(s_range) == 2:
-            df_fil = df_f[(df_f['dt_obj'].dt.date >= s_range[0]) & (df_f['dt_obj'].dt.date <= s_range[1])]
+            # Filtraggio corazzato
+            mask = (df_f['dt_obj'].dt.date >= s_range[0]) & (df_f['dt_obj'].dt.date <= s_range[1])
+            df_fil = df_f[mask]
+            
             conc = df_fil[df_fil['Esito'] != "Pendente"]
             scomm = round(conc['Stake'].sum(), 2)
             vinto = round(conc[conc['Esito']=="VINTO"]['Profitto'].sum() + conc[conc['Esito']=="VINTO"]['Stake'].sum(), 2)
             
             c1, c2, c3 = st.columns(3)
-            c1.metric("Scommesso", f"{scomm} €")
-            c2.metric("Rientrato", f"{vinto} €")
-            c3.metric("Netto", f"{round(vinto-scomm, 2)} €")
-            st.dataframe(df_fil.drop(columns=['dt_obj']).sort_index(ascending=False))
+            c1.metric("Volume Scommesso", f"{scomm} €")
+            c2.metric("Rientro Lordo", f"{vinto} €")
+            c3.metric("Profitto Netto", f"{round(vinto-scomm, 2)} €")
+            
+            st.dataframe(df_fil.drop(columns=['dt_obj']).sort_index(ascending=False), use_container_width=True)

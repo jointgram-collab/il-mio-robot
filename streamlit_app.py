@@ -1,11 +1,11 @@
 import streamlit as st
 import pandas as pd
 import requests
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from streamlit_gsheets import GSheetsConnection
 
 # --- CONFIGURAZIONE UI ---
-st.set_page_config(page_title="AI SNIPER V11.32 - Financial Sync", layout="wide")
+st.set_page_config(page_title="AI SNIPER V11.33 - Objective Tracker", layout="wide")
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 API_KEY = '01f1c8f2a314814b17de03eeb6c53623'
@@ -42,49 +42,46 @@ def salva_db(df):
     conn.update(worksheet="Giocate", data=df)
     st.cache_data.clear()
 
-# --- AUTO-CHECK ---
-def check_results():
-    df = carica_db()
-    pendenti = df[df['Esito'] == "Pendente"]
-    if pendenti.empty: 
-        st.info("Nessuna giocata pendente da controllare.")
-        return
-    cambiamenti = False
-    with st.spinner("🔄 Verifica risultati e allineamento cloud..."):
-        for skey in pendenti['Sport_Key'].unique():
-            res = requests.get(f'https://api.the-odds-api.com/v4/sports/{skey}/scores/', params={'api_key': API_KEY, 'daysFrom': 3})
-            if res.status_code == 200:
-                scores = res.json()
-                for i, r in pendenti[pendenti['Sport_Key'] == skey].iterrows():
-                    m_res = next((m for m in scores if f"{m['home_team']}-{m['away_team']}" == r['Match'] and m.get('completed')), None)
-                    if m_res and m_res.get('scores'):
-                        s = m_res['scores']
-                        score_str = f"{s[0]['score']}-{s[1]['score']}"
-                        goals = sum(int(x['score']) for x in s)
-                        vinto = (r['Scelta'] == "OVER 2.5" and goals > 2.5) or (r['Scelta'] == "UNDER 2.5" and goals < 2.5)
-                        df.at[i, 'Esito'] = "VINTO" if vinto else "PERSO"
-                        df.at[i, 'Risultato'] = score_str
-                        df.at[i, 'Profitto'] = round((r['Stake']*r['Quota'])-r['Stake'], 2) if vinto else -r['Stake']
-                        cambiamenti = True
-    if cambiamenti: 
-        salva_db(df)
-        st.success("Risultati aggiornati con successo!")
-        st.rerun()
-
 # --- INTERFACCIA ---
-st.title("🎯 AI SNIPER V11.32")
+st.title("🎯 AI SNIPER V11.33")
 if 'api_data' not in st.session_state: st.session_state['api_data'] = []
 
 t1, t2, t3 = st.tabs(["🔍 SCANNER", "💼 PORTAFOGLIO", "📊 FISCALE"])
 
-# [Tab 1 Scanner - Rimane invariato]
 with t1:
+    df_tot = carica_db()
+    
     with st.sidebar:
         st.header("⚙️ Parametri Cassa")
         budget_cassa = st.number_input("Budget (€)", value=250.0)
         rischio = st.slider("Kelly", 0.05, 0.50, 0.20)
         soglia_val = st.slider("Valore Min %", 0, 15, 5) / 100
-    
+        
+        st.divider()
+        st.header("📈 Obiettivo Settimanale")
+        target_settimanale = st.number_input("Match Target", value=10)
+        
+        # Calcolo partite della settimana corrente (Lunedì-Domenica)
+        today = date.today()
+        start_week = today - timedelta(days=today.weekday())
+        
+        if not df_tot.empty:
+            partite_settimana = df_tot[df_tot['dt_obj'].dt.date >= start_week].shape[0]
+        else:
+            partite_settimana = 0
+            
+        mancanti = max(0, target_settimanale - partite_settimana)
+        progresso = min(1.0, partite_settimana / target_settimanale)
+        
+        st.progress(progresso)
+        st.write(f"Giocate: **{partite_settimana}** | Mancanti: **{mancanti}**")
+        
+        if mancanti > 0:
+            st.info(f"💡 Mancano {mancanti} match per completare il piano settimanale.")
+        else:
+            st.success("✅ Obiettivo raggiunto! Valuta se fermarti o selezionare solo match 'Top Value'.")
+
+    # Logica Scanner (Serie A, Premier, ecc.)
     leagues = {v: k for k, v in LEAGUE_NAMES.items()}
     sel_name = st.selectbox("Campionato:", list(leagues.keys()))
     sel_key = leagues[sel_name]
@@ -105,7 +102,6 @@ with t1:
                             q_ov = next((o['price'] for o in mk['outcomes'] if o['name'] == 'Over' and o['point'] == 2.5), None)
                             q_un = next((o['price'] for o in mk['outcomes'] if o['name'] == 'Under' and o['point'] == 2.5), None)
                             if q_ov and q_un:
-                                # Calcolo probabilità implicita semplificato per valore
                                 margin = (1/q_ov) + (1/q_un)
                                 p_ov, p_un = (1/q_ov)/margin, (1/q_un)/margin
                                 opts.append({"T": "OVER 2.5", "Q": q_ov, "P": p_ov+0.06, "BK": b['title']})
@@ -116,22 +112,18 @@ with t1:
                     if val/100 > soglia_val:
                         st.write(f"📅 {date_m} | {sel_name} | **{m['home_team']}-{m['away_team']}**")
                         if st.button(f"ADD {best['T']} @{best['Q']} (+{val}%)", key=f"add_{m['home_team']}_{best['BK']}"):
-                            # Logica Kelly per Stake
                             valore_k = (best['P'] * best['Q']) - 1
                             importo_k = budget_cassa * (valore_k / (best['Q'] - 1)) * rischio
                             final_stake = round(max(2.0, min(importo_k, budget_cassa * 0.15)), 2)
-                            
                             n = {"Data Match": date_m, "Match": f"{m['home_team']}-{m['away_team']}", "Scelta": best['T'], "Quota": best['Q'], "Stake": final_stake, "Bookmaker": best['BK'], "Esito": "Pendente", "Profitto": 0.0, "Sport_Key": sel_key, "Risultato": "-"}
                             salva_db(pd.concat([carica_db(), pd.DataFrame([n])], ignore_index=True))
-                            st.toast("Giocata salvata!")
+                            st.rerun() # Refresh per aggiornare il contatore nella sidebar
             except: continue
 
 with t2:
     st.subheader("💼 Gestione Portafoglio")
     df_p = carica_db()
     pend = df_p[df_p['Esito'] == "Pendente"]
-    
-    # --- METRICHE PORTAFOGLIO ---
     capitale_esposto = round(pend['Stake'].sum(), 2)
     rientro_potenziale = round((pend['Stake'] * pend['Quota']).sum(), 2)
     vincita_potenziale_netta = round(rientro_potenziale - capitale_esposto, 2)
@@ -139,30 +131,22 @@ with t2:
     m1, m2, m3 = st.columns(3)
     m1.metric("Capitale Esposto", f"{capitale_esposto} €")
     m2.metric("Rientro Potenziale (Lordo)", f"{rientro_potenziale} €")
-    m3.metric("Possibile Vincita (Netta)", f"{vincita_potenziale_netta} €", delta=f"+{vincita_potenziale_netta}€", delta_color="normal")
+    m3.metric("Possibile Vincita (Netta)", f"{vincita_potenziale_netta} €")
     
-    st.button("🔄 CONTROLLA E AGGIORNA RISULTATI", on_click=check_results, use_container_width=True)
     st.divider()
-    
     if pend.empty:
-        st.info("Nessuna scommessa pendente. Usa lo Scanner per aggiungere nuovi match!")
+        st.info("Nessun match pendente.")
     else:
         for i, r in pend.iterrows():
             c_info, c_del = st.columns([5, 1])
-            camp = LEAGUE_NAMES.get(r['Sport_Key'], "Altro")
             vincita_r = round(r['Stake'] * r['Quota'], 2)
-            
-            c_info.write(f"📅 **{r['Data Match']}** | {camp}")
-            c_info.write(f"🏟️ **{r['Match']}** | 🎯 **{r['Scelta']}** @{r['Quota']}")
-            c_info.write(f"💰 Puntata: {r['Stake']}€ | 💸 Rientro: **{vincita_r}€** (Profitto: {round(vincita_r-r['Stake'],2)}€)")
-            
+            c_info.write(f"📅 **{r['Data Match']}** | {LEAGUE_NAMES.get(r['Sport_Key'], 'Altro')}")
+            c_info.write(f"🏟️ **{r['Match']}** | 🎯 **{r['Scelta']}** @{r['Quota']} | 💰 Stake: {r['Stake']}€")
             if c_del.button("🗑️", key=f"del_{i}"):
                 salva_db(df_p.drop(i))
                 st.rerun()
-            st.divider()
 
 with t3:
-    # [Tab 3 Fiscale - Rimane invariato con le card colorate]
     st.subheader("📊 Analisi Fiscale")
     df_f = carica_db()
     if not df_f.empty:

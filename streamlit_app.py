@@ -5,7 +5,7 @@ from datetime import datetime, date
 from streamlit_gsheets import GSheetsConnection
 
 # --- CONFIGURAZIONE UI ---
-st.set_page_config(page_title="AI SNIPER V11.27 - Bulletproof", layout="wide")
+st.set_page_config(page_title="AI SNIPER V11.28 - Pro Portfolio", layout="wide")
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 API_KEY = '01f1c8f2a314814b17de03eeb6c53623'
@@ -18,16 +18,25 @@ BK_EURO_AUTH = {
     "William Hill": "https://www.williamhill.it", "888sport": "https://www.888sport.it"
 }
 
+# Mapping nomi campionati per visualizzazione
+LEAGUE_NAMES = {
+    "soccer_italy_serie_a": "🇮🇹 Serie A",
+    "soccer_italy_serie_b": "🇮🇹 Serie B",
+    "soccer_england_league_1": "🏴󠁧󠁢󠁥󠁮󠁧󠁿 Premier League",
+    "soccer_spain_la_liga": "🇪🇸 La Liga",
+    "soccer_germany_bundesliga": "🇩🇪 Bundesliga",
+    "soccer_uefa_champions_league": "🇪🇺 Champions",
+    "soccer_uefa_europa_league": "🇪🇺 Europa League",
+    "soccer_france_ligue_1": "🇫🇷 Ligue 1"
+}
+
 # --- MOTORE DATABASE ---
 def carica_db():
     try:
         df = conn.read(worksheet="Giocate", ttl=0)
         if df is None or df.empty:
             return pd.DataFrame(columns=["Data Match", "Match", "Scelta", "Quota", "Stake", "Bookmaker", "Esito", "Profitto", "Sport_Key", "Risultato"])
-        
         df = df.dropna(subset=["Match"])
-        
-        # Conversione sicura delle date
         df['dt_obj'] = pd.to_datetime(df['Data Match'] + f"/{date.today().year}", format="%d/%m %H:%M/%Y", errors='coerce')
         return df
     except:
@@ -74,7 +83,7 @@ def check_results():
     if cambiamenti: salva_db(df); st.rerun()
 
 # --- INTERFACCIA ---
-st.title("🎯 AI SNIPER V11.27")
+st.title("🎯 AI SNIPER V11.28")
 if 'api_data' not in st.session_state: st.session_state['api_data'] = []
 
 t1, t2, t3 = st.tabs(["🔍 SCANNER", "💼 PORTAFOGLIO", "📊 FISCALE"])
@@ -86,15 +95,12 @@ with t1:
         rischio = st.slider("Kelly", 0.05, 0.50, 0.20)
         soglia_val = st.slider("Valore Min %", 0, 15, 5) / 100
     
-    leagues = {
-        "ITALIA: Serie A": "soccer_italy_serie_a",
-        "UK: Premier League": "soccer_england_league_1",
-        "EUROPA: Champions": "soccer_uefa_champions_league"
-    }
-    sel_league = st.selectbox("Campionato:", list(leagues.keys()))
+    leagues = {v: k for k, v in LEAGUE_NAMES.items()}
+    sel_name = st.selectbox("Campionato:", list(leagues.keys()))
+    sel_key = leagues[sel_name]
     
     if st.button("🚀 SCANSIONA"):
-        res = requests.get(f'https://api.the-odds-api.com/v4/sports/{leagues[sel_league]}/odds/', params={'api_key': API_KEY, 'regions': 'eu', 'markets': 'totals'})
+        res = requests.get(f'https://api.the-odds-api.com/v4/sports/{sel_key}/odds/', params={'api_key': API_KEY, 'regions': 'eu', 'markets': 'totals'})
         if res.status_code == 200: st.session_state['api_data'] = res.json()
 
     if st.session_state['api_data']:
@@ -116,46 +122,51 @@ with t1:
                     best = max(opts, key=lambda x: (x['P'] * x['Q']) - 1)
                     val = round(((best['P'] * best['Q']) - 1) * 100, 2)
                     if val/100 > soglia_val:
-                        st.write(f"📅 {date_m} | **{m['home_team']}-{m['away_team']}** | {best['BK']}")
+                        st.write(f"📅 {date_m} | {sel_name} | **{m['home_team']}-{m['away_team']}**")
                         if st.button(f"ADD {best['T']} @{best['Q']} (+{val}%)", key=f"add_{m['home_team']}_{best['BK']}"):
-                            n = {"Data Match": date_m, "Match": f"{m['home_team']}-{m['away_team']}", "Scelta": best['T'], "Quota": best['Q'], "Stake": calc_stake(best['P'], best['Q'], budget_cassa, rischio), "Bookmaker": best['BK'], "Esito": "Pendente", "Profitto": 0.0, "Sport_Key": leagues[sel_league], "Risultato": "-"}
+                            n = {"Data Match": date_m, "Match": f"{m['home_team']}-{m['away_team']}", "Scelta": best['T'], "Quota": best['Q'], "Stake": calc_stake(best['P'], best['Q'], budget_cassa, rischio), "Bookmaker": best['BK'], "Esito": "Pendente", "Profitto": 0.0, "Sport_Key": sel_key, "Risultato": "-"}
                             salva_db(pd.concat([carica_db(), pd.DataFrame([n])], ignore_index=True))
                             st.toast("Aggiunto!")
             except: continue
 
 with t2:
-    st.subheader("💼 Portafoglio")
-    if st.button("🔄 AUTO-CHECK RISULTATI"): check_results()
+    st.subheader("💼 Portafoglio Pendente")
+    if st.button("🔄 AGGIORNA RISULTATI"): check_results()
     df_p = carica_db()
     pend = df_p[df_p['Esito'] == "Pendente"]
+    
     st.metric("Capitale Esposto", f"{round(pend['Stake'].sum(), 2)} €")
+    st.divider()
+    
     for i, r in pend.iterrows():
-        c1, c2 = st.columns([4, 1])
-        c1.write(f"**{r['Match']}** - {r['Scelta']} @{r['Quota']} ({r['Stake']}€)")
-        if c2.button("🗑️", key=f"del_{i}"): salva_db(df_p.drop(i)); st.rerun()
+        c_info, c_del = st.columns([5, 1])
+        # Recupero nome leggibile del campionato
+        campionato = LEAGUE_NAMES.get(r['Sport_Key'], "Sport Vari")
+        c_info.write(f"📅 **{r['Data Match']}** | {campionato}")
+        c_info.write(f"🏟️ **{r['Match']}** | 🎯 {r['Scelta']} @{r['Quota']} | 💰 Stake: **{r['Stake']}€**")
+        if c_del.button("🗑️", key=f"del_{i}"):
+            salva_db(df_p.drop(i))
+            st.rerun()
+        st.divider()
 
 with t3:
     st.subheader("📊 Fiscale & Filtri")
     df_f = carica_db()
     if not df_f.empty and 'dt_obj' in df_f.columns:
-        # Pulizia rigorosa per il filtro
         df_valid = df_f.dropna(subset=['dt_obj'])
-        
         start_date = df_valid['dt_obj'].min().date() if not df_valid.empty else date.today()
         s_range = st.date_input("Range Temporale:", [start_date, date.today()])
         
         if len(s_range) == 2:
-            # Filtraggio corazzato
             mask = (df_f['dt_obj'].dt.date >= s_range[0]) & (df_f['dt_obj'].dt.date <= s_range[1])
             df_fil = df_f[mask]
-            
             conc = df_fil[df_fil['Esito'] != "Pendente"]
             scomm = round(conc['Stake'].sum(), 2)
             vinto = round(conc[conc['Esito']=="VINTO"]['Profitto'].sum() + conc[conc['Esito']=="VINTO"]['Stake'].sum(), 2)
             
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Volume Scommesso", f"{scomm} €")
-            c2.metric("Rientro Lordo", f"{vinto} €")
-            c3.metric("Profitto Netto", f"{round(vinto-scomm, 2)} €")
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Volume Scommesso", f"{scomm} €")
+            m2.metric("Rientro Lordo", f"{vinto} €")
+            m3.metric("Profitto Netto", f"{round(vinto-scomm, 2)} €")
             
             st.dataframe(df_fil.drop(columns=['dt_obj']).sort_index(ascending=False), use_container_width=True)

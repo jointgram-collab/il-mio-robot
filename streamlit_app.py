@@ -5,7 +5,7 @@ from datetime import datetime, date
 from streamlit_gsheets import GSheetsConnection
 
 # --- CONFIGURAZIONE UI ---
-st.set_page_config(page_title="AI SNIPER V11.30 - Full Context", layout="wide")
+st.set_page_config(page_title="AI SNIPER V11.31 - Synced Edition", layout="wide")
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 API_KEY = '01f1c8f2a314814b17de03eeb6c53623'
@@ -19,23 +19,22 @@ BK_EURO_AUTH = {
 }
 
 LEAGUE_NAMES = {
-    "soccer_italy_serie_a": "🇮🇹 Serie A",
-    "soccer_italy_serie_b": "🇮🇹 Serie B",
-    "soccer_england_league_1": "🏴󠁧󠁢󠁥󠁮󠁧󠁿 Premier League",
-    "soccer_spain_la_liga": "🇪🇸 La Liga",
-    "soccer_germany_bundesliga": "🇩🇪 Bundesliga",
-    "soccer_uefa_champions_league": "🇪🇺 Champions",
-    "soccer_uefa_europa_league": "🇪🇺 Europa League",
-    "soccer_france_ligue_1": "🇫🇷 Ligue 1"
+    "soccer_italy_serie_a": "🇮🇹 Serie A", "soccer_italy_serie_b": "🇮🇹 Serie B",
+    "soccer_england_league_1": "🏴󠁧󠁢󠁥󠁮󠁧󠁿 Premier League", "soccer_spain_la_liga": "🇪🇸 La Liga",
+    "soccer_germany_bundesliga": "🇩🇪 Bundesliga", "soccer_uefa_champions_league": "🇪🇺 Champions",
+    "soccer_uefa_europa_league": "🇪🇺 Europa League", "soccer_france_ligue_1": "🇫🇷 Ligue 1"
 }
 
-# --- MOTORE DATABASE ---
+# --- MOTORE DATABASE UNIFICATO ---
 def carica_db():
     try:
+        # ttl=0 garantisce che leggiamo sempre i dati freschi dal cloud
         df = conn.read(worksheet="Giocate", ttl=0)
         if df is None or df.empty:
             return pd.DataFrame(columns=["Data Match", "Match", "Scelta", "Quota", "Stake", "Bookmaker", "Esito", "Profitto", "Sport_Key", "Risultato"])
+        
         df = df.dropna(subset=["Match"])
+        # Conversione forzata per evitare disallineamenti tra i Tab
         df['dt_obj'] = pd.to_datetime(df['Data Match'] + f"/{date.today().year}", format="%d/%m %H:%M/%Y", errors='coerce')
         return df
     except:
@@ -44,7 +43,7 @@ def carica_db():
 def salva_db(df):
     if 'dt_obj' in df.columns: df = df.drop(columns=['dt_obj'])
     conn.update(worksheet="Giocate", data=df)
-    st.cache_data.clear()
+    st.cache_data.clear() # Svuota la cache per forzare l'allineamento
 
 # --- LOGICA CALCOLI ---
 def get_totals_value(q_over, q_under):
@@ -63,7 +62,7 @@ def check_results():
     pendenti = df[df['Esito'] == "Pendente"]
     if pendenti.empty: return
     cambiamenti = False
-    with st.spinner("🔄 Verifica risultati..."):
+    with st.spinner("🔄 Allineamento risultati..."):
         for skey in pendenti['Sport_Key'].unique():
             res = requests.get(f'https://api.the-odds-api.com/v4/sports/{skey}/scores/', params={'api_key': API_KEY, 'daysFrom': 3})
             if res.status_code == 200:
@@ -82,7 +81,7 @@ def check_results():
     if cambiamenti: salva_db(df); st.rerun()
 
 # --- INTERFACCIA ---
-st.title("🎯 AI SNIPER V11.30")
+st.title("🎯 AI SNIPER V11.31")
 if 'api_data' not in st.session_state: st.session_state['api_data'] = []
 
 t1, t2, t3 = st.tabs(["🔍 SCANNER", "💼 PORTAFOGLIO", "📊 FISCALE"])
@@ -125,15 +124,15 @@ with t1:
                         if st.button(f"ADD {best['T']} @{best['Q']} (+{val}%)", key=f"add_{m['home_team']}_{best['BK']}"):
                             n = {"Data Match": date_m, "Match": f"{m['home_team']}-{m['away_team']}", "Scelta": best['T'], "Quota": best['Q'], "Stake": calc_stake(best['P'], best['Q'], budget_cassa, rischio), "Bookmaker": best['BK'], "Esito": "Pendente", "Profitto": 0.0, "Sport_Key": sel_key, "Risultato": "-"}
                             salva_db(pd.concat([carica_db(), pd.DataFrame([n])], ignore_index=True))
-                            st.toast("Aggiunto!")
+                            st.toast("Dato inviato al Cloud!")
             except: continue
 
 with t2:
     st.subheader("💼 Portafoglio Pendente")
-    if st.button("🔄 AGGIORNA RISULTATI"): check_results()
+    if st.button("🔄 FORZA SINCRONIZZAZIONE"): check_results()
     df_p = carica_db()
     pend = df_p[df_p['Esito'] == "Pendente"]
-    st.metric("Capitale Esposto", f"{round(pend['Stake'].sum(), 2)} €")
+    st.metric("Capitale Esposto (Live)", f"{round(pend['Stake'].sum(), 2)} €")
     st.divider()
     for i, r in pend.iterrows():
         c_info, c_del = st.columns([5, 1])
@@ -146,35 +145,35 @@ with t2:
 with t3:
     st.subheader("📊 Analisi Fiscale")
     df_f = carica_db()
-    if not df_f.empty and 'dt_obj' in df_f.columns:
+    if not df_f.empty:
+        # Pulizia rigorosa
         df_valid = df_f.dropna(subset=['dt_obj'])
-        start_date = df_valid['dt_obj'].min().date() if not df_valid.empty else date.today()
-        s_range = st.date_input("Range Temporale:", [start_date, date.today()])
+        # Selettore date che include TUTTO di default
+        min_d = df_valid['dt_obj'].min().date() if not df_valid.empty else date.today()
+        s_range = st.date_input("Filtra Periodo:", [min_d, date.today()])
         
         if len(s_range) == 2:
             mask = (df_f['dt_obj'].dt.date >= s_range[0]) & (df_f['dt_obj'].dt.date <= s_range[1])
             df_fil = df_f[mask]
+            
+            # Calcoli su dati filtrati
             conc = df_fil[df_fil['Esito'] != "Pendente"]
             scomm = round(conc['Stake'].sum(), 2)
             vinto = round(conc[conc['Esito']=="VINTO"]['Profitto'].sum() + conc[conc['Esito']=="VINTO"]['Stake'].sum(), 2)
+            profitto_netto = round(vinto - scomm, 2)
             
-            m1, m2, m3 = st.columns(3)
-            m1.metric("Volume Scommesso", f"{scomm} €")
-            m2.metric("Rientro Lordo", f"{vinto} €")
-            m3.metric("Profitto Netto", f"{round(vinto-scomm, 2)} €", delta=f"{round(vinto-scomm, 2)} €")
+            # Queste metriche ora devono corrispondere al portafoglio se il filtro è su "Tutto"
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Scommesso nel periodo", f"{scomm} €")
+            col2.metric("Vinto nel periodo", f"{vinto} €")
+            col3.metric("Profitto Netto", f"{profitto_netto} €", delta=f"{profitto_netto} €")
             
-            st.write("### 📜 Dettaglio Esiti (Timeline)")
+            st.write("### 📜 Storico Timeline")
             for i, row in df_fil.sort_index(ascending=False).iterrows():
-                # Recupero nome campionato
-                campionato_fmt = LEAGUE_NAMES.get(row['Sport_Key'], "Sport Vari")
-                
+                camp_fmt = LEAGUE_NAMES.get(row['Sport_Key'], "Sport Vari")
                 if row['Esito'] == "VINTO":
-                    st.success(f"🟢 **VINTO** | {row['Data Match']} | {campionato_fmt} | **{row['Match']}** | {row['Risultato']} | +{row['Profitto']}€")
+                    st.success(f"🟢 **VINTO** | {row['Data Match']} | {camp_fmt} | **{row['Match']}** | {row['Risultato']} | +{row['Profitto']}€")
                 elif row['Esito'] == "PERSO":
-                    st.error(f"🔴 **PERSO** | {row['Data Match']} | {campionato_fmt} | **{row['Match']}** | {row['Risultato']} | {row['Profitto']}€")
+                    st.error(f"🔴 **PERSO** | {row['Data Match']} | {camp_fmt} | **{row['Match']}** | {row['Risultato']} | {row['Profitto']}€")
                 else:
-                    st.warning(f"🟡 **PENDENTE** | {row['Data Match']} | {campionato_fmt} | **{row['Match']}** | {row['Scelta']} @{row['Quota']}")
-            
-            st.divider()
-            st.write("### 🗃️ Tabella Dati")
-            st.dataframe(df_fil.drop(columns=['dt_obj']).sort_index(ascending=False), use_container_width=True)
+                    st.warning(f"🟡 **PENDENTE** | {row['Data Match']} | {camp_fmt} | **{row['Match']}** | {row['Scelta']} @{row['Quota']}")

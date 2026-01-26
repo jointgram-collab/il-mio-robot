@@ -5,7 +5,7 @@ from datetime import datetime, date
 from streamlit_gsheets import GSheetsConnection
 
 # --- CONFIGURAZIONE UI ---
-st.set_page_config(page_title="AI SNIPER V11.28 - Pro Portfolio", layout="wide")
+st.set_page_config(page_title="AI SNIPER V11.29 - Ultimate Visual", layout="wide")
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 API_KEY = '01f1c8f2a314814b17de03eeb6c53623'
@@ -18,7 +18,6 @@ BK_EURO_AUTH = {
     "William Hill": "https://www.williamhill.it", "888sport": "https://www.888sport.it"
 }
 
-# Mapping nomi campionati per visualizzazione
 LEAGUE_NAMES = {
     "soccer_italy_serie_a": "🇮🇹 Serie A",
     "soccer_italy_serie_b": "🇮🇹 Serie B",
@@ -83,14 +82,14 @@ def check_results():
     if cambiamenti: salva_db(df); st.rerun()
 
 # --- INTERFACCIA ---
-st.title("🎯 AI SNIPER V11.28")
+st.title("🎯 AI SNIPER V11.29")
 if 'api_data' not in st.session_state: st.session_state['api_data'] = []
 
 t1, t2, t3 = st.tabs(["🔍 SCANNER", "💼 PORTAFOGLIO", "📊 FISCALE"])
 
 with t1:
     with st.sidebar:
-        st.header("⚙️ Parametri")
+        st.header("⚙️ Parametri Cassa")
         budget_cassa = st.number_input("Budget (€)", value=250.0)
         rischio = st.slider("Kelly", 0.05, 0.50, 0.20)
         soglia_val = st.slider("Valore Min %", 0, 15, 5) / 100
@@ -134,23 +133,18 @@ with t2:
     if st.button("🔄 AGGIORNA RISULTATI"): check_results()
     df_p = carica_db()
     pend = df_p[df_p['Esito'] == "Pendente"]
-    
     st.metric("Capitale Esposto", f"{round(pend['Stake'].sum(), 2)} €")
     st.divider()
-    
     for i, r in pend.iterrows():
         c_info, c_del = st.columns([5, 1])
-        # Recupero nome leggibile del campionato
         campionato = LEAGUE_NAMES.get(r['Sport_Key'], "Sport Vari")
         c_info.write(f"📅 **{r['Data Match']}** | {campionato}")
         c_info.write(f"🏟️ **{r['Match']}** | 🎯 {r['Scelta']} @{r['Quota']} | 💰 Stake: **{r['Stake']}€**")
-        if c_del.button("🗑️", key=f"del_{i}"):
-            salva_db(df_p.drop(i))
-            st.rerun()
+        if c_del.button("🗑️", key=f"del_{i}"): salva_db(df_p.drop(i)); st.rerun()
         st.divider()
 
 with t3:
-    st.subheader("📊 Fiscale & Filtri")
+    st.subheader("📊 Analisi Fiscale")
     df_f = carica_db()
     if not df_f.empty and 'dt_obj' in df_f.columns:
         df_valid = df_f.dropna(subset=['dt_obj'])
@@ -167,6 +161,17 @@ with t3:
             m1, m2, m3 = st.columns(3)
             m1.metric("Volume Scommesso", f"{scomm} €")
             m2.metric("Rientro Lordo", f"{vinto} €")
-            m3.metric("Profitto Netto", f"{round(vinto-scomm, 2)} €")
+            m3.metric("Profitto Netto", f"{round(vinto-scomm, 2)} €", delta=f"{round(vinto-scomm, 2)} €")
             
+            st.write("### 📜 Dettaglio Esiti (Timeline)")
+            for i, row in df_fil.sort_index(ascending=False).iterrows():
+                if row['Esito'] == "VINTO":
+                    st.success(f"🟢 **VINTO** | {row['Data Match']} | **{row['Match']}** | Esito: {row['Risultato']} | Profitto: +{row['Profitto']}€")
+                elif row['Esito'] == "PERSO":
+                    st.error(f"🔴 **PERSO** | {row['Data Match']} | **{row['Match']}** | Esito: {row['Risultato']} | Perdita: {row['Profitto']}€")
+                else:
+                    st.warning(f"🟡 **PENDENTE** | {row['Data Match']} | **{row['Match']}** | {row['Scelta']} @{row['Quota']}")
+            
+            st.divider()
+            st.write("### 🗃️ Tabella Dati")
             st.dataframe(df_fil.drop(columns=['dt_obj']).sort_index(ascending=False), use_container_width=True)

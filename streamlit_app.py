@@ -5,7 +5,7 @@ from datetime import datetime, date
 from streamlit_gsheets import GSheetsConnection
 
 # --- CONFIGURAZIONE UI ---
-st.set_page_config(page_title="AI SNIPER V11.29 - Ultimate Visual", layout="wide")
+st.set_page_config(page_title="AI SNIPER V11.30 - Full Context", layout="wide")
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 API_KEY = '01f1c8f2a314814b17de03eeb6c53623'
@@ -82,7 +82,7 @@ def check_results():
     if cambiamenti: salva_db(df); st.rerun()
 
 # --- INTERFACCIA ---
-st.title("🎯 AI SNIPER V11.29")
+st.title("🎯 AI SNIPER V11.30")
 if 'api_data' not in st.session_state: st.session_state['api_data'] = []
 
 t1, t2, t3 = st.tabs(["🔍 SCANNER", "💼 PORTAFOGLIO", "📊 FISCALE"])
@@ -165,12 +165,15 @@ with t3:
             
             st.write("### 📜 Dettaglio Esiti (Timeline)")
             for i, row in df_fil.sort_index(ascending=False).iterrows():
+                # Recupero nome campionato
+                campionato_fmt = LEAGUE_NAMES.get(row['Sport_Key'], "Sport Vari")
+                
                 if row['Esito'] == "VINTO":
-                    st.success(f"🟢 **VINTO** | {row['Data Match']} | **{row['Match']}** | Esito: {row['Risultato']} | Profitto: +{row['Profitto']}€")
+                    st.success(f"🟢 **VINTO** | {row['Data Match']} | {campionato_fmt} | **{row['Match']}** | {row['Risultato']} | +{row['Profitto']}€")
                 elif row['Esito'] == "PERSO":
-                    st.error(f"🔴 **PERSO** | {row['Data Match']} | **{row['Match']}** | Esito: {row['Risultato']} | Perdita: {row['Profitto']}€")
+                    st.error(f"🔴 **PERSO** | {row['Data Match']} | {campionato_fmt} | **{row['Match']}** | {row['Risultato']} | {row['Profitto']}€")
                 else:
-                    st.warning(f"🟡 **PENDENTE** | {row['Data Match']} | **{row['Match']}** | {row['Scelta']} @{row['Quota']}")
+                    st.warning(f"🟡 **PENDENTE** | {row['Data Match']} | {campionato_fmt} | **{row['Match']}** | {row['Scelta']} @{row['Quota']}")
             
             st.divider()
             st.write("### 🗃️ Tabella Dati")

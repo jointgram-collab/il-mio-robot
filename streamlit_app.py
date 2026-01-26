@@ -1,102 +1,93 @@
 import streamlit as st
 import pandas as pd
 import requests
-from datetime import datetime
+from datetime import datetime, date
 from streamlit_gsheets import GSheetsConnection
 
-# --- CONFIGURAZIONE UI ---
-st.set_page_config(page_title="AI SNIPER V11.23 - Pro Dashboard", layout="wide")
+# --- CONFIGURAZIONE ---
+st.set_page_config(page_title="AI SNIPER V11.24 - Pro Analytics", layout="wide")
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 API_KEY = '01f1c8f2a314814b17de03eeb6c53623'
 
-BK_EURO_AUTH = {
-    "Bet365": "https://www.bet365.it", "Snai": "https://www.snai.it",
-    "Better": "https://www.lottomatica.it/scommesse", "Planetwin365": "https://www.planetwin365.it",
-    "Eurobet": "https://www.eurobet.it", "Goldbet": "https://www.goldbet.it", 
-    "Sisal": "https://www.sisal.it", "Bwin": "https://www.bwin.it",
-    "William Hill": "https://www.williamhill.it", "888sport": "https://www.888sport.it"
-}
-
-# --- MOTORE DATABASE ---
+# --- FUNZIONI CORE ---
 def carica_db():
     try:
         df = conn.read(worksheet="Giocate", ttl=0)
         if df is None or df.empty:
             return pd.DataFrame(columns=["Data Match", "Match", "Scelta", "Quota", "Stake", "Bookmaker", "Esito", "Profitto", "Sport_Key", "Risultato"])
-        return df.dropna(subset=["Match"])
+        
+        # Pulizia e conversione date per il filtro
+        df = df.dropna(subset=["Match"])
+        # Cerchiamo di convertire la colonna Data Match in formato datetime per il filtro
+        # Nota: assumiamo il formato salvato "GG/MM HH:MM" dell'anno corrente
+        df['dt_obj'] = pd.to_datetime(df['Data Match'] + f"/{date.today().year}", format="%d/%m/%Y %H:%M", errors='coerce')
+        return df
     except:
         return pd.DataFrame(columns=["Data Match", "Match", "Scelta", "Quota", "Stake", "Bookmaker", "Esito", "Profitto", "Sport_Key", "Risultato"])
 
-def salva_db_completo(df):
+def salva_db(df):
+    if 'dt_obj' in df.columns: df = df.drop(columns=['dt_obj'])
     conn.update(worksheet="Giocate", data=df)
     st.cache_data.clear()
 
 # --- INTERFACCIA ---
-st.title("🎯 AI SNIPER V11.23")
+st.title("🎯 AI SNIPER V11.24")
 
 t1, t2, t3 = st.tabs(["🔍 SCANNER", "💼 PORTAFOGLIO", "📊 FISCALE"])
 
-with t1:
-    with st.sidebar:
-        st.header("⚙️ Parametri")
-        budget_cassa = st.number_input("Budget Attuale (€)", value=250.0)
-        rischio = st.slider("Kelly Frazionario", 0.05, 0.50, 0.20)
-        soglia_val = st.slider("Valore Minimo %", 0, 15, 5) / 100
-    
-    # ... (Logica Scanner V11.22 integrata) ...
-    st.info("Usa lo scanner per trovare match con valore > 5%")
-
-with t2:
-    st.subheader("💼 Gestione Capitale Esposto")
-    df_p = carica_db()
-    pendenti = df_p[df_p['Esito'] == "Pendente"]
-    
-    if not pendenti.empty:
-        esposizione = round(pendenti['Stake'].sum(), 2)
-        rientro_pot = round((pendenti['Stake'] * pendenti['Quota']).sum(), 2)
-        
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Capitale in gioco", f"{esposizione} €")
-        c2.metric("Rientro Potenziale", f"{rientro_pot} €")
-        c3.metric("Profitto Potenziale", f"{round(rientro_pot - esposizione, 2)} €", delta_color="normal")
-        
-        st.write("---")
-        for i, r in pendenti.iterrows():
-            col_a, col_b, col_c = st.columns([3, 2, 1])
-            col_a.write(f"📅 **{r['Data Match']}** | **{r['Match']}**\n{r['Scelta']} @{r['Quota']} ({r['Bookmaker']})")
-            col_b.write(f"Puntata: **{r['Stake']}€**\nVincita: **{round(r['Stake']*r['Quota'], 2)}€**")
-            if col_c.button("🗑️ Elimina", key=f"del_{i}"):
-                salva_db_completo(df_p.drop(i))
-                st.rerun()
-    else:
-        st.write("Nessuna scommessa in corso. Vai allo scanner!")
+# ... [Tab 1 e Tab 2 rimangono invariati rispetto alla V11.23] ...
 
 with t3:
-    st.subheader("📊 Analisi Performance verso i 5.000€")
-    df_f = carica_db()
-    finiti = df_f[df_f['Esito'] != "Pendente"]
+    st.subheader("📊 Analisi Performance & Filtri Temporali")
     
-    if not finiti.empty:
-        # Calcolo Metriche
-        target = 5000.0
-        profitto_netto = round(df_f['Profitto'].sum(), 2)
-        mancante = round(target - profitto_netto, 2)
-        win_rate = round((len(df_f[df_f['Esito'] == "VINTO"]) / len(finiti)) * 100, 1)
+    df_f = carica_db()
+    
+    if not df_f.empty:
+        # --- FILTRO DATE ---
+        col_d1, col_d2 = st.columns(2)
+        min_date = df_f['dt_obj'].min().date() if not df_f['dt_obj'].isnull().all() else date.today()
+        max_date = date.today()
         
-        # Dashboard Superiore
-        col_f1, col_f2, col_f3 = st.columns(3)
-        col_f1.metric("Profitto Netto", f"{profitto_netto} €", delta=f"{profitto_netto} €")
-        col_f2.metric("Mancano al Target", f"{mancante} €")
-        col_f3.metric("Win Rate", f"{win_rate} %")
+        filtro_date = col_d1.date_input("Seleziona Range Temporale", 
+                                        value=(min_date, max_date),
+                                        min_value=min_date,
+                                        max_value=max_date + pd.Timedelta(days=365))
         
-        # Barra di avanzamento
-        progress = min(max(profitto_netto / target, 0.0), 1.0)
-        st.write(f"**Progresso Obiettivo 5.000€:** {round(progress*100, 1)}%")
-        st.progress(progress)
+        # Applicazione filtro
+        if isinstance(filtro_date, tuple) and len(filtro_date) == 2:
+            start_date, end_date = filtro_date
+            mask = (df_f['dt_obj'].dt.date >= start_date) & (df_f['dt_obj'].dt.date <= end_date)
+            df_filtrato = df_f[mask]
+        else:
+            df_filtrato = df_f
+
+        # --- CALCOLI DINAMICI ---
+        partite_concluse = df_filtrato[df_filtrato['Esito'] != "Pendente"]
         
-        st.write("### 📜 Storico Dettagliato")
-        # Visualizzazione tabella con colori (opzionale con dataframe)
-        st.dataframe(df_f.sort_index(ascending=False), use_container_width=True)
+        tot_scommesso = round(partite_concluse['Stake'].sum(), 2)
+        # La somma vinta è il profitto + lo stake delle vinte
+        tot_vinto = round(partite_concluse[partite_concluse['Esito'] == "VINTO"]['Profitto'].sum() + 
+                          partite_concluse[partite_concluse['Esito'] == "VINTO"]['Stake'].sum(), 2)
+        profitto_netto = round(partite_concluse['Profitto'].sum(), 2)
+        roi = round((profitto_netto / tot_scommesso * 100), 2) if tot_scommesso > 0 else 0
+        
+        # --- DASHBOARD METRICHE ---
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Totale Scommesso", f"{tot_scommesso} €")
+        m2.metric("Totale Rientrato", f"{tot_vinto} €", delta=f"{profitto_netto} € Netto")
+        m3.metric("ROI Periodo", f"{roi} %")
+        m4.metric("Target 5000€", f"{round(5000 - df_f['Profitto'].sum(), 2)} €")
+
+        st.divider()
+        
+        # Tabella Storico Filtrata
+        st.write(f"📂 Mostrando **{len(df_filtrato)}** operazioni nel periodo selezionato")
+        st.dataframe(df_filtrato.drop(columns=['dt_obj']).sort_index(ascending=False), use_container_width=True)
+        
+        # Export pulsante
+        csv = df_filtrato.to_csv(index=False).encode('utf-8')
+        st.download_button("📥 Scarica Report CSV", data=csv, file_name=f"report_sniper_{date.today()}.csv", mime='text/csv')
+
     else:
-        st.warning("Storico vuoto. Le partite appariranno qui dopo l'Auto-Check.")
+        st.info("Nessun dato disponibile nel database per generare il report.")

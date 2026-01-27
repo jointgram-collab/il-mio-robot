@@ -5,7 +5,7 @@ from datetime import datetime, date, timedelta
 from streamlit_gsheets import GSheetsConnection
 
 # --- 1. CONFIGURAZIONE ---
-st.set_page_config(page_title="AI SNIPER V11.48", layout="wide")
+st.set_page_config(page_title="AI SNIPER V11.49 - TOTAL REBUILD", layout="wide")
 
 API_KEY = '01f1c8f2a314814b17de03eeb6c53623'
 TARGET_FINALE = 5000.0
@@ -21,7 +21,7 @@ LEAGUE_MAP = {
 
 BK_AUTH = ["Bet365", "Snai", "Better", "Planetwin365", "Eurobet", "Goldbet", "Sisal", "Bwin", "888sport"]
 
-# --- 2. MOTORE DATABASE (CON CACHE ANTI-BLOCCO) ---
+# --- 2. MOTORE DATABASE (CACHE ANTI-BLOCCO) ---
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 @st.cache_data(ttl=20)
@@ -30,11 +30,10 @@ def carica_db():
         df = conn.read(worksheet="Giocate", ttl=0)
         if df is None or df.empty:
             return pd.DataFrame(columns=["Data Match", "Match", "Scelta", "Quota", "Stake", "Bookmaker", "Esito", "Profitto", "Sport_Key", "Risultato"])
-        # Gestione data
         df['dt_obj'] = pd.to_datetime(df['Data Match'] + f"/{date.today().year}", format="%d/%m %H:%M/%Y", errors='coerce')
         return df.dropna(subset=["Match"])
     except Exception as e:
-        st.error(f"Errore connessione Google: {e}")
+        st.error(f"Errore connessione Google Sheets: {e}")
         return pd.DataFrame(columns=["Data Match", "Match", "Scelta", "Quota", "Stake", "Bookmaker", "Esito", "Profitto", "Sport_Key", "Risultato"])
 
 def salva_db(df):
@@ -49,7 +48,7 @@ def check_results():
     pendenti = df[df['Esito'] == "Pendente"]
     if pendenti.empty: return
     cambiamenti = False
-    with st.spinner("🔄 Recupero Score..."):
+    with st.spinner("🔄 Recupero Score in corso..."):
         for skey in pendenti['Sport_Key'].unique():
             res = requests.get(f'https://api.the-odds-api.com/v4/sports/{skey}/scores/', params={'api_key': API_KEY, 'daysFrom': 3})
             if res.status_code == 200:
@@ -68,16 +67,16 @@ def check_results():
     if cambiamenti: salva_db(df); st.rerun()
 
 # --- 4. INTERFACCIA PRINCIPALE ---
-st.title("🎯 AI SNIPER V11.48")
+st.title("🎯 AI SNIPER V11.49")
 df_tot = carica_db()
 
 t1, t2, t3 = st.tabs(["🔍 SCANNER", "💼 PORTAFOGLIO", "📊 FISCALE"])
 
-# --- TAB 1: SCANNER CON DEEP DEBUG ---
+# --- TAB 1: SCANNER ---
 with t1:
     col_l, col_v = st.columns([1, 2])
     sel_name = col_l.selectbox("Campionato:", list(LEAGUE_MAP.keys()))
-    soglia_v = col_v.slider("Soglia Valore %", 0, 15, 2) / 100
+    soglia_v = col_v.slider("Soglia Valore %", -5, 15, 2) / 100 # Soglia estesa per debug
     
     if st.button("🚀 AVVIA SCANSIONE", use_container_width=True):
         st.session_state['api_data'] = None
@@ -85,24 +84,24 @@ with t1:
             try:
                 url = f'https://api.the-odds-api.com/v4/sports/{LEAGUE_MAP[sel_name]}/odds/'
                 params = {'api_key': API_KEY, 'regions': 'eu', 'markets': 'totals', 'oddsFormat': 'decimal'}
-                
-                st.write("Cercando dati sui server...")
-                res = requests.get(url, params=params, timeout=12)
+                res = requests.get(url, params=params, timeout=15)
                 
                 if res.status_code == 200:
                     st.session_state['api_data'] = res.json()
                     rem = res.headers.get('x-requests-remaining', 'N/D')
                     st.sidebar.metric("Crediti API", rem)
-                    status.update(label="✅ Dati ricevuti!", state="complete", expanded=False)
+                    status.update(label=f"✅ Ricevuti {len(st.session_state['api_data'])} Match", state="complete", expanded=False)
                 else:
-                    st.error(f"Errore API {res.status_code}: {res.text}")
-                    status.update(label="❌ Errore API", state="error")
+                    st.error(f"Errore API {res.status_code}")
+                    status.update(label="❌ Errore", state="error")
             except Exception as e:
-                st.error(f"Connessione fallita: {e}")
-                status.update(label="❌ Timeout", state="error")
+                st.error(f"Errore: {e}")
+                status.update(label="❌ Fallito", state="error")
 
     if 'api_data' in st.session_state and st.session_state['api_data']:
         match_pendenti = df_tot[df_tot['Esito'] == "Pendente"]['Match'].tolist()
+        match_trovati = 0
+        
         for m in st.session_state['api_data']:
             try:
                 nome_m = f"{m['home_team']}-{m['away_team']}"
@@ -113,6 +112,7 @@ with t1:
                     if b['title'] in BK_AUTH:
                         mk = next((x for x in b['markets'] if x['key'] == 'totals'), None)
                         if mk:
+                            # Cerchiamo Over 2.5
                             q_o = next((o['price'] for o in mk['outcomes'] if o['name'] == 'Over' and o['point'] == 2.5), 0)
                             q_u = next((o['price'] for o in mk['outcomes'] if o['name'] == 'Under' and o['point'] == 2.5), 0)
                             if q_o > 1 and q_u > 1:
@@ -121,20 +121,28 @@ with t1:
                                 opts.append({"T": "OVER 2.5", "Q": q_o, "V": (prob_o * q_o) - 1, "BK": b['title']})
                 
                 if opts:
+                    match_trovati += 1
                     best = max(opts, key=lambda x: x['V'])
-                    if best['V'] >= soglia_v:
-                        c_info, c_add = st.columns([4, 1])
-                        if nome_m in match_pendenti:
-                            c_info.write(f"📅 {date_m} | {nome_m} | ✅ **IN LISTA**")
-                        else:
-                            c_info.write(f"📅 {date_m} | **{nome_m}** | Valore: **{round(best['V']*100,1)}%**")
-                            if c_add.button(f"ADD {best['Q']}", key=f"btn_{nome_m}"):
+                    c_info, c_add = st.columns([4, 1])
+                    
+                    if nome_m in match_pendenti:
+                        c_info.write(f"📅 {date_m} | {nome_m} | ✅ **IN PORTAFOGLIO**")
+                    else:
+                        is_valore = best['V'] >= soglia_v
+                        colore = "#00FF00" if is_valore else "#888888"
+                        c_info.markdown(f"📅 {date_m} | **{nome_m}** | <span style='color:{colore}'>Valore: {round(best['V']*100,1)}%</span> (BK: {best['BK']})", unsafe_allow_html=True)
+                        
+                        if is_valore:
+                            if c_add.button(f"ADD {best['Q']}", key=f"add_{nome_m}"):
                                 stake = round(max(2.0, min(250 * (best['V']/(best['Q']-1)) * 0.15, 30.0)), 2)
                                 n = {"Data Match": date_m, "Match": nome_m, "Scelta": best['T'], "Quota": best['Q'], "Stake": stake, "Bookmaker": best['BK'], "Esito": "Pendente", "Profitto": 0.0, "Sport_Key": LEAGUE_MAP[sel_name], "Risultato": "-"}
                                 salva_db(pd.concat([carica_db(), pd.DataFrame([n])], ignore_index=True))
                                 st.rerun()
-                        st.divider()
+                    st.divider()
             except: continue
+        
+        if match_trovati == 0:
+            st.warning("I match sono stati ricevuti, ma nessuno ha quote Over/Under 2.5 disponibili nei bookmaker autorizzati.")
 
 # --- TAB 2: PORTAFOGLIO ---
 with t2:
@@ -144,7 +152,7 @@ with t2:
         st.button("🔄 AGGIORNA RISULTATI", on_click=check_results, use_container_width=True)
         for i, r in pend.iterrows():
             cm, cb = st.columns([10, 1])
-            cm.markdown(f"🗓️ {r['Data Match']} | **{r['Match']}** | <span style='font-size:1.1rem;'>**{r['Scelta']} @{r['Quota']}**</span> | 💰 {r['Stake']}€", unsafe_allow_html=True)
+            cm.markdown(f"🗓️ {r['Data Match']} | **{r['Match']}** | <span style='font-size:1.1rem;'>**{r['Scelta']} @{r['Quota']}**</span> | 💰 {r['Stake']}€ | 🏦 {r['Bookmaker']}", unsafe_allow_html=True)
             if cb.button("🗑️", key=f"del_{i}"):
                 salva_db(df_tot.drop(i)); st.rerun()
             st.divider()
@@ -158,4 +166,5 @@ with t3:
         mancante = round(TARGET_FINALE - netto, 2)
         st.info(f"🏆 Goal: {TARGET_FINALE}€ | Attuale: {netto}€ | Mancano: {mancante}€")
         st.progress(min(1.0, max(0.0, netto / TARGET_FINALE)))
+        
         st.dataframe(df_tot[["Data Match", "Match", "Scelta", "Quota", "Esito", "Profitto", "Risultato"]].sort_index(ascending=False), use_container_width=True)

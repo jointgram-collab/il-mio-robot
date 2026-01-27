@@ -5,7 +5,7 @@ from datetime import datetime, date
 from streamlit_gsheets import GSheetsConnection
 
 # --- CONFIGURAZIONE UI ---
-st.set_page_config(page_title="AI SNIPER V11.40 - Full Info", layout="wide")
+st.set_page_config(page_title="AI SNIPER V11.40 - Visual Fiscale", layout="wide")
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 API_KEY = '01f1c8f2a314814b17de03eeb6c53623'
@@ -37,31 +37,7 @@ def salva_db(df):
     conn.update(worksheet="Giocate", data=df)
     st.cache_data.clear()
 
-def check_results():
-    df = carica_db()
-    pendenti = df[df['Esito'] == "Pendente"]
-    if pendenti.empty: return
-    cambiamenti = False
-    with st.spinner("Verifica risultati..."):
-        for skey in pendenti['Sport_Key'].unique():
-            res = requests.get(f'https://api.the-odds-api.com/v4/sports/{skey}/scores/', params={'api_key': API_KEY, 'daysFrom': 3})
-            if res.status_code == 200:
-                scores = res.json()
-                for i, r in pendenti[pendenti['Sport_Key'] == skey].iterrows():
-                    m_res = next((m for m in scores if f"{m['home_team']}-{m['away_team']}" == r['Match'] and m.get('completed')), None)
-                    if m_res:
-                        s = m_res['scores']
-                        if s:
-                            s1, s2 = int(s[0]['score']), int(s[1]['score'])
-                            vinto = (s1 + s2) > 2.5 if r['Scelta'] == "OVER 2.5" else (s1 + s2) < 2.5
-                            df.at[i, 'Esito'] = "VINTO" if vinto else "PERSO"
-                            df.at[i, 'Risultato'] = f"{s1}-{s2}"
-                            df.at[i, 'Profitto'] = round((r['Stake'] * r['Quota']) - r['Stake'], 2) if vinto else -r['Stake']
-                            cambiamenti = True
-    if cambiamenti:
-        salva_db(df)
-        st.rerun()
-
+# --- INTERFACCIA ---
 st.title("🎯 AI SNIPER V11.40")
 df_attuale = carica_db()
 
@@ -77,6 +53,7 @@ with st.sidebar:
 
 t1, t2, t3 = st.tabs(["🔍 SCANNER", "💼 PORTAFOGLIO", "📊 FISCALE"])
 
+# --- TAB 1: SCANNER ---
 with t1:
     leagues = {v: k for k, v in LEAGUE_NAMES.items()}
     sel_name = st.selectbox("Campionato:", list(leagues.keys()))
@@ -108,41 +85,45 @@ with t1:
                     best = max(opts, key=lambda x: (x['P'] * x['Q']) - 1)
                     val = (best['P'] * best['Q']) - 1
                     if val >= soglia_val:
-                        # CALCOLO STAKE PREVENTIVO PER LO SCANNER
-                        stk_consigliato = round(max(2.0, min(budget_cassa * (val/(best['Q']-1)) * rischio, budget_cassa*0.15)), 2)
-                        
+                        stk_c = round(max(2.0, min(budget_cassa * (val/(best['Q']-1)) * rischio, budget_cassa*0.15)), 2)
                         c_a, c_b = st.columns([3, 1])
-                        is_p = " ✅" if nome_m in pend_list else ""
-                        
-                        # AGGIUNTO STAKE NEL TESTO
-                        c_a.write(f"📅 {dt_m} | **{nome_m}** | {best['BK']} | Val: **{round(val*100,1)}%** | Suggerito: **{stk_consigliato}€**{is_p}")
-                        
+                        c_a.write(f"📅 {dt_m} | **{nome_m}** | {best['BK']} | Val: **{round(val*100,1)}%** | Suggerito: **{stk_c}€**")
                         if c_b.button(f"ADD @{best['Q']}", key=f"add_{nome_m}", disabled=(nome_m in pend_list)):
-                            nuova = pd.DataFrame([{"Data Match": dt_m, "Match": nome_m, "Scelta": best['T'], "Quota": best['Q'], "Stake": stk_consigliato, "Bookmaker": best['BK'], "Esito": "Pendente", "Profitto": 0.0, "Sport_Key": leagues[sel_name], "Risultato": "-"}])
+                            nuova = pd.DataFrame([{"Data Match": dt_m, "Match": nome_m, "Scelta": best['T'], "Quota": best['Q'], "Stake": stk_c, "Bookmaker": best['BK'], "Esito": "Pendente", "Profitto": 0.0, "Sport_Key": leagues[sel_name], "Risultato": "-"}])
                             salva_db(pd.concat([carica_db(), nuova], ignore_index=True))
                             st.rerun()
                         st.divider()
             except: continue
 
+# --- TAB 2: PORTAFOGLIO ---
 with t2:
-    st.button("🔄 AGGIORNA RISULTATI", on_click=check_results, use_container_width=True)
-    st.divider()
     df_p = df_attuale[df_attuale['Esito'] == "Pendente"]
     if not df_p.empty:
         for i, r in df_p.iterrows():
             vinc_p = round(r['Stake'] * r['Quota'], 2)
             c1, c2 = st.columns([12, 1])
-            c1.markdown(f"🏟️ **{r['Match']}** | {r['Scelta']} @**{r['Quota']}** | Stake: **{r['Stake']}€** | Vincita: **{vinc_p}€** | 🏦 {r['Bookmaker']}")
+            c1.warning(f"🏟️ **{r['Match']}** | {r['Scelta']} @**{r['Quota']}** | Stake: **{r['Stake']}€** | Vincita: **{vinc_p}€** | 🏦 {r['Bookmaker']}")
             if c2.button("🗑️", key=f"del_{i}"):
                 salva_db(df_attuale.drop(i))
                 st.rerun()
-            st.divider()
-    else:
-        st.write("Nessuna giocata pendente.")
+    else: st.write("Nessuna giocata pendente.")
 
+# --- TAB 3: FISCALE ---
 with t3:
     st.subheader("📊 Analisi Profitti")
     p_tot = round(df_attuale['Profitto'].sum(), 2)
-    st.metric("Profitto Netto", f"{p_tot} €")
+    st.metric("Profitto Netto", f"{p_tot} €", delta=f"{round((p_tot/TARGET_FINALE)*100, 1)}% del target")
     st.progress(min(1.0, max(0.0, p_tot / TARGET_FINALE)))
-    st.dataframe(df_attuale.sort_index(ascending=False), use_container_width=True, hide_index=True)
+    
+    # --- LOGICA COLORI ---
+    def color_row(row):
+        if row['Esito'] == "VINTO": return ['background-color: rgba(0, 255, 0, 0.2)'] * len(row)
+        if row['Esito'] == "PERSO": return ['background-color: rgba(255, 0, 0, 0.2)'] * len(row)
+        if row['Esito'] == "Pendente": return ['background-color: rgba(255, 255, 0, 0.2)'] * len(row)
+        return [''] * len(row)
+
+    if not df_attuale.empty:
+        st.write("### Storico Operazioni")
+        # Visualizziamo solo le colonne importanti
+        view_df = df_attuale[["Data Match", "Match", "Scelta", "Quota", "Stake", "Esito", "Profitto", "Risultato", "Bookmaker"]]
+        st.dataframe(view_df.sort_index(ascending=False).style.apply(color_row, axis=1), use_container_width=True)

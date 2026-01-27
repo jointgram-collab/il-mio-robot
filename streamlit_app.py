@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, date
 from streamlit_gsheets import GSheetsConnection
 
 # --- CONFIGURAZIONE UI ---
-st.set_page_config(page_title="AI SNIPER V13.0 - Full Backup", layout="wide")
+st.set_page_config(page_title="AI SNIPER V13.1", layout="wide")
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 API_KEY = '01f1c8f2a314814b17de03eeb6c53623'
@@ -79,7 +79,7 @@ def check_results():
         st.rerun()
 
 # --- INTERFACCIA ---
-st.title("🎯 AI SNIPER V13.0")
+st.title("🎯 AI SNIPER V13.1")
 df_attuale = carica_db()
 
 with st.sidebar:
@@ -94,37 +94,29 @@ with st.sidebar:
 
 t1, t2, t3 = st.tabs(["🔍 SCANNER", "💼 PORTAFOGLIO", "📊 FISCALE"])
 
-# --- TAB 1: SCANNER (Con filtro temporale sulla Scansione Totale) ---
+# --- TAB 1: SCANNER ---
 with t1:
     leagues = {v: k for k, v in LEAGUE_NAMES.items()}
     c_sel, c_all, c_ore = st.columns([2, 1, 1])
     sel_name = c_sel.selectbox("Campionato Singolo:", list(leagues.keys()))
-    # Ho aggiunto un selettore ore anche per la scansione totale
-    ore_limite = c_ore.selectbox("Finestra Ore:", [24, 48, 72, 96, 120], index=2) # Default 72h
+    ore_limite = c_ore.selectbox("Finestra Ore:", [24, 48, 72, 96, 120, 168], index=2) 
     
     if c_all.button("🚀 SCANSIONE TOTALE", use_container_width=True):
         all_found = []
         keys_to_scan = list(LEAGUE_NAMES.keys())
         keys_to_scan.append(get_champions_key())
         pbar = st.progress(0)
-        
-        now = datetime.utcnow()
-        limit_date = now + timedelta(hours=ore_limite)
+        limit_date = datetime.utcnow() + timedelta(hours=ore_limite)
         
         for idx, k in enumerate(set(keys_to_scan)):
             r = requests.get(f'https://api.the-odds-api.com/v4/sports/{k}/odds/', params={'api_key': API_KEY, 'regions': 'eu', 'markets': 'totals'})
             if r.status_code == 200:
                 data = r.json()
-                # FILTRO TEMPORALE: Prende solo i match entro il limite ore scelto
-                filtered_data = [
-                    m for m in data 
-                    if datetime.strptime(m['commence_time'], "%Y-%m-%dT%H:%M:%SZ") <= limit_date
-                ]
-                all_found.extend(filtered_data)
+                filtered = [m for m in data if datetime.strptime(m['commence_time'], "%Y-%m-%dT%H:%M:%SZ") <= limit_date]
+                all_found.extend(filtered)
                 st.session_state['api_usage']['remaining'] = r.headers.get('x-requests-remaining')
             time.sleep(0.4)
             pbar.progress((idx + 1) / len(set(keys_to_scan)))
-        
         st.session_state['api_data'] = all_found
         st.rerun()
 
@@ -132,7 +124,9 @@ with t1:
         target_key = get_champions_key() if "Champions" in sel_name else leagues[sel_name]
         res = requests.get(f'https://api.the-odds-api.com/v4/sports/{target_key}/odds/', params={'api_key': API_KEY, 'regions': 'eu', 'markets': 'totals'})
         if res.status_code == 200:
-            st.session_state['api_data'] = res.json()
+            data = res.json()
+            limit_date = datetime.utcnow() + timedelta(hours=ore_limite)
+            st.session_state['api_data'] = [m for m in data if datetime.strptime(m['commence_time'], "%Y-%m-%dT%H:%M:%SZ") <= limit_date]
             st.session_state['api_usage']['remaining'] = res.headers.get('x-requests-remaining')
             st.rerun()
 
@@ -149,17 +143,21 @@ with t1:
                         if mk:
                             q_ov = next((o['price'] for o in mk['outcomes'] if o['name'] == 'Over' and float(o.get('point',0)) == 2.5), None)
                             q_un = next((o['price'] for o in mk['outcomes'] if o['name'] == 'Under' and float(o.get('point',0)) == 2.5), None)
-                            if q_ov and q_un:
-                                margin = (1/q_ov) + (1/q_un)
-                                opts.append({"T": "OVER 2.5", "Q": q_ov, "P": ((1/q_ov)/margin)+0.06, "BK": b['title']})
+                            if q_ov:
+                                margin_ov = (1/q_ov) + 0.48 # Stima probabilità approssimativa per valore
+                                opts.append({"T": "OVER 2.5", "Q": q_ov, "P": (1/q_ov)+0.06, "BK": b['title']})
+                            if q_un:
+                                opts.append({"T": "UNDER 2.5", "Q": q_un, "P": (1/q_un)+0.06, "BK": b['title']})
+                
                 if opts:
                     best = max(opts, key=lambda x: (x['P'] * x['Q']) - 1)
                     val = (best['P'] * best['Q']) - 1
                     if val >= soglia_val:
                         stk_c = round(max(2.0, min(budget_cassa * (val/(best['Q']-1)) * rischio, budget_cassa*0.15)), 2)
                         c_a, c_b = st.columns([3, 1])
-                        c_a.write(f"📅 {dt_m} | **{nome_m}** | {m['sport_title']} | Val: **{round(val*100,1)}%**")
-                        if c_b.button(f"ADD @{best['Q']}", key=f"add_{i}", disabled=(nome_m in pend_list)):
+                        # AGGIORNATO: Visualizzazione Scelta e Stake nello Scanner
+                        c_a.markdown(f"📅 {dt_m} | **{nome_m}** | {m['sport_title']}<br>🎯 Giocata: **{best['T']}** @{best['Q']} | Stake: **{stk_c}€** | Val: **{round(val*100,1)}%** | 🏦 {best['BK']}", unsafe_allow_html=True)
+                        if c_b.button(f"ADD", key=f"add_{i}", disabled=(nome_m in pend_list), use_container_width=True):
                             nuova = pd.DataFrame([{"Data Match": dt_m, "Match": nome_m, "Scelta": best['T'], "Quota": best['Q'], "Stake": stk_c, "Bookmaker": best['BK'], "Esito": "Pendente", "Profitto": 0.0, "Sport_Key": m['sport_key'], "Risultato": "-"}])
                             salva_db(pd.concat([carica_db(), nuova], ignore_index=True))
                             st.rerun()
@@ -171,7 +169,6 @@ with t2:
     st.button("🔄 AGGIORNA RISULTATI", on_click=check_results, use_container_width=True)
     st.markdown("<br>", unsafe_allow_html=True)
     df_p = df_attuale[df_attuale['Esito'] == "Pendente"]
-    
     if not df_p.empty:
         for i, r in df_p.iterrows():
             vinc_p = round(r['Stake'] * r['Quota'], 2)
@@ -185,10 +182,9 @@ with t2:
             if c2.button("🗑️", key=f"del_{i}"):
                 salva_db(df_attuale.drop(i))
                 st.rerun()
-    else: 
-        st.info("Nessuna giocata pendente.")
+    else: st.info("Nessuna giocata pendente.")
 
-# --- TAB 3: FISCALE (CON BACKUP COMPLETO) ---
+# --- TAB 3: FISCALE ---
 with t3:
     st.subheader("🏁 Cruscotto Finanziario")
     if not df_attuale.empty:
@@ -196,54 +192,24 @@ with t3:
         tot_vinto = round(df_attuale[df_attuale['Esito'] == "VINTO"]['Profitto'].sum() + df_attuale[df_attuale['Esito'] == "VINTO"]['Stake'].sum(), 2)
         tot_perso = round(df_attuale[df_attuale['Esito'] == "PERSO"]['Stake'].sum(), 2)
         prof_netto = round(df_attuale['Profitto'].sum(), 2)
-        
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("💰 Giocato", f"{tot_giocato} €")
         m2.metric("✅ Vinto", f"{tot_vinto} €")
         m3.metric("❌ Perso", f"{tot_perso} €")
         m4.metric("📈 Netto", f"{prof_netto} €")
-        
         st.divider()
-        
-        # --- SEZIONE BACKUP ---
-        st.write("### 📂 Gestione Backup Dati")
         col_exp, col_imp = st.columns(2)
-        
         with col_exp:
-            st.write("Esporta i dati attuali:")
             csv_data = df_attuale.to_csv(index=False).encode('utf-8')
             st.download_button("📥 SCARICA CSV BACKUP", data=csv_data, file_name=f"sniper_backup_{date.today()}.csv", use_container_width=True)
-        
         with col_imp:
-            st.write("Ripristina da file CSV:")
-            up_file = st.file_uploader("Scegli un file CSV", type="csv")
-            if up_file is not None:
-                if st.button("🔄 RIPRISTINA DATABASE", use_container_width=True):
-                    try:
-                        nuovo_df = pd.read_csv(up_file)
-                        salva_db(nuovo_df)
-                        st.success("Database ripristinato con successo!")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Errore durante l'importazione: {e}")
-
+            up_file = st.file_uploader("Carica Backup CSV", type="csv")
+            if up_file and st.button("🔄 RIPRISTINA", use_container_width=True):
+                salva_db(pd.read_csv(up_file))
+                st.rerun()
         st.divider()
         def color_row(row):
             if row['Esito'] == "VINTO": return ['background-color: rgba(0, 255, 0, 0.15)'] * len(row)
             if row['Esito'] == "PERSO": return ['background-color: rgba(255, 0, 0, 0.15)'] * len(row)
-            if row['Esito'] == "Pendente": return ['background-color: rgba(255, 255, 0, 0.15)'] * len(row)
-            return [''] * len(row)
-
-        st.write("### Storico Operazioni")
-        view_df = df_attuale[["Data Match", "Match", "Scelta", "Quota", "Stake", "Esito", "Profitto", "Risultato", "Bookmaker"]]
-        st.dataframe(view_df.sort_index(ascending=False).style.apply(color_row, axis=1), use_container_width=True)
-    else:
-        st.info("Database vuoto.")
-        # Anche se vuoto, permettiamo l'importazione per ripristinare
-        st.write("### 📤 Importa Backup")
-        up_file = st.file_uploader("Carica un file CSV per ripristinare i dati", type="csv")
-        if up_file is not None:
-            if st.button("🔄 RIPRISTINA DATABASE"):
-                nuovo_df = pd.read_csv(up_file)
-                salva_db(nuovo_df)
-                st.rerun()
+            return ['background-color: rgba(255, 255, 0, 0.15)'] * len(row)
+        st.dataframe(df_attuale[["Data Match", "Match", "Scelta", "Quota", "Stake", "Esito", "Profitto", "Risultato", "Bookmaker"]].sort_index(ascending=False).style.apply(color_row, axis=1), use_container_width=True)

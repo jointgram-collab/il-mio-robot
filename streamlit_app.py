@@ -94,24 +94,37 @@ with st.sidebar:
 
 t1, t2, t3 = st.tabs(["🔍 SCANNER", "💼 PORTAFOGLIO", "📊 FISCALE"])
 
-# --- TAB 1: SCANNER ---
+# --- TAB 1: SCANNER (Con filtro temporale sulla Scansione Totale) ---
 with t1:
     leagues = {v: k for k, v in LEAGUE_NAMES.items()}
-    c_sel, c_all = st.columns([2, 1])
+    c_sel, c_all, c_ore = st.columns([2, 1, 1])
     sel_name = c_sel.selectbox("Campionato Singolo:", list(leagues.keys()))
+    # Ho aggiunto un selettore ore anche per la scansione totale
+    ore_limite = c_ore.selectbox("Finestra Ore:", [24, 48, 72, 96, 120], index=2) # Default 72h
     
     if c_all.button("🚀 SCANSIONE TOTALE", use_container_width=True):
         all_found = []
         keys_to_scan = list(LEAGUE_NAMES.keys())
         keys_to_scan.append(get_champions_key())
         pbar = st.progress(0)
+        
+        now = datetime.utcnow()
+        limit_date = now + timedelta(hours=ore_limite)
+        
         for idx, k in enumerate(set(keys_to_scan)):
             r = requests.get(f'https://api.the-odds-api.com/v4/sports/{k}/odds/', params={'api_key': API_KEY, 'regions': 'eu', 'markets': 'totals'})
             if r.status_code == 200:
-                all_found.extend(r.json())
+                data = r.json()
+                # FILTRO TEMPORALE: Prende solo i match entro il limite ore scelto
+                filtered_data = [
+                    m for m in data 
+                    if datetime.strptime(m['commence_time'], "%Y-%m-%dT%H:%M:%SZ") <= limit_date
+                ]
+                all_found.extend(filtered_data)
                 st.session_state['api_usage']['remaining'] = r.headers.get('x-requests-remaining')
             time.sleep(0.4)
             pbar.progress((idx + 1) / len(set(keys_to_scan)))
+        
         st.session_state['api_data'] = all_found
         st.rerun()
 

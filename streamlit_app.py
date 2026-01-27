@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, date
 from streamlit_gsheets import GSheetsConnection
 
 # --- CONFIGURAZIONE UI ---
-st.set_page_config(page_title="AI SNIPER V12.9 - Ultra Compact", layout="wide")
+st.set_page_config(page_title="AI SNIPER V13.0 - Full Backup", layout="wide")
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 API_KEY = '01f1c8f2a314814b17de03eeb6c53623'
@@ -79,7 +79,7 @@ def check_results():
         st.rerun()
 
 # --- INTERFACCIA ---
-st.title("🎯 AI SNIPER V12.9")
+st.title("🎯 AI SNIPER V13.0")
 df_attuale = carica_db()
 
 with st.sidebar:
@@ -153,7 +153,7 @@ with t1:
                         st.divider()
             except: continue
 
-# --- TAB 2: PORTAFOGLIO (SINGLE LINE COMPACT) ---
+# --- TAB 2: PORTAFOGLIO ---
 with t2:
     st.button("🔄 AGGIORNA RISULTATI", on_click=check_results, use_container_width=True)
     st.markdown("<br>", unsafe_allow_html=True)
@@ -163,9 +163,7 @@ with t2:
         for i, r in df_p.iterrows():
             vinc_p = round(r['Stake'] * r['Quota'], 2)
             league_name = LEAGUE_NAMES.get(r['Sport_Key'], r['Sport_Key'].split("_")[-1].upper())
-            
             c1, c2 = st.columns([18, 1])
-            # Layout su una singola riga con evento in grassetto
             c1.markdown(f"""
                 <div style='background-color: rgba(255, 193, 7, 0.1); padding: 5px 10px; border-radius: 5px; margin-bottom: 2px; border-left: 4px solid #ffc107;'>
                     <b>{r['Match']}</b> ({league_name}) | <b>{r['Scelta']}</b> @{r['Quota']} | Stake: {r['Stake']}€ | Vincita: {vinc_p}€ | 🏦 {r['Bookmaker']}
@@ -177,7 +175,7 @@ with t2:
     else: 
         st.info("Nessuna giocata pendente.")
 
-# --- TAB 3: FISCALE (STILE CLASSICO) ---
+# --- TAB 3: FISCALE (CON BACKUP COMPLETO) ---
 with t3:
     st.subheader("🏁 Cruscotto Finanziario")
     if not df_attuale.empty:
@@ -193,8 +191,28 @@ with t3:
         m4.metric("📈 Netto", f"{prof_netto} €")
         
         st.divider()
-        csv_data = df_attuale.to_csv(index=False).encode('utf-8')
-        st.download_button("📥 ESPORTA CSV", data=csv_data, file_name=f"sniper_backup_{date.today()}.csv", use_container_width=True)
+        
+        # --- SEZIONE BACKUP ---
+        st.write("### 📂 Gestione Backup Dati")
+        col_exp, col_imp = st.columns(2)
+        
+        with col_exp:
+            st.write("Esporta i dati attuali:")
+            csv_data = df_attuale.to_csv(index=False).encode('utf-8')
+            st.download_button("📥 SCARICA CSV BACKUP", data=csv_data, file_name=f"sniper_backup_{date.today()}.csv", use_container_width=True)
+        
+        with col_imp:
+            st.write("Ripristina da file CSV:")
+            up_file = st.file_uploader("Scegli un file CSV", type="csv")
+            if up_file is not None:
+                if st.button("🔄 RIPRISTINA DATABASE", use_container_width=True):
+                    try:
+                        nuovo_df = pd.read_csv(up_file)
+                        salva_db(nuovo_df)
+                        st.success("Database ripristinato con successo!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Errore durante l'importazione: {e}")
 
         st.divider()
         def color_row(row):
@@ -208,3 +226,11 @@ with t3:
         st.dataframe(view_df.sort_index(ascending=False).style.apply(color_row, axis=1), use_container_width=True)
     else:
         st.info("Database vuoto.")
+        # Anche se vuoto, permettiamo l'importazione per ripristinare
+        st.write("### 📤 Importa Backup")
+        up_file = st.file_uploader("Carica un file CSV per ripristinare i dati", type="csv")
+        if up_file is not None:
+            if st.button("🔄 RIPRISTINA DATABASE"):
+                nuovo_df = pd.read_csv(up_file)
+                salva_db(nuovo_df)
+                st.rerun()

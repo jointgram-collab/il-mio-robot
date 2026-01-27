@@ -5,7 +5,7 @@ from datetime import datetime, date
 from streamlit_gsheets import GSheetsConnection
 
 # --- CONFIGURAZIONE UI ---
-st.set_page_config(page_title="AI SNIPER V11.40 - COMPLETE", layout="wide")
+st.set_page_config(page_title="AI SNIPER V11.40 - Final Pro", layout="wide")
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 API_KEY = '01f1c8f2a314814b17de03eeb6c53623'
@@ -36,6 +36,42 @@ def carica_db():
 def salva_db(df):
     conn.update(worksheet="Giocate", data=df)
     st.cache_data.clear()
+
+# --- FUNZIONE CONTROLLO RISULTATI ---
+def check_results():
+    df = carica_db()
+    pendenti = df[df['Esito'] == "Pendente"]
+    if pendenti.empty:
+        st.info("Nessuna scommessa pendente da controllare.")
+        return
+    
+    cambiamenti = False
+    with st.spinner("🔄 Verifica risultati in corso..."):
+        for skey in pendenti['Sport_Key'].unique():
+            # Chiamata all'endpoint scores
+            res = requests.get(f'https://api.the-odds-api.com/v4/sports/{skey}/scores/', params={'api_key': API_KEY, 'daysFrom': 3})
+            if res.status_code == 200:
+                scores = res.json()
+                for i, r in pendenti[pendenti['Sport_Key'] == skey].iterrows():
+                    # Cerchiamo il match completato
+                    m_res = next((m for m in scores if f"{m['home_team']}-{m['away_team']}" == r['Match'] and m.get('completed')), None)
+                    if m_res:
+                        s = m_res['scores']
+                        if s:
+                            s1, s2 = int(s[0]['score']), int(s[1]['score'])
+                            tot_goals = s1 + s2
+                            vinto = tot_goals > 2.5 if r['Scelta'] == "OVER 2.5" else tot_goals < 2.5
+                            
+                            df.at[i, 'Esito'] = "VINTO" if vinto else "PERSO"
+                            df.at[i, 'Risultato'] = f"{s1}-{s2}"
+                            df.at[i, 'Profitto'] = round((r['Stake'] * r['Quota']) - r['Stake'], 2) if vinto else -r['Stake']
+                            cambiamenti = True
+    if cambiamenti:
+        salva_db(df)
+        st.success("Aggiornamento completato!")
+        st.rerun()
+    else:
+        st.warning("Nessun nuovo risultato finale disponibile.")
 
 # --- INTERFACCIA ---
 st.title("🎯 AI SNIPER V11.40")
@@ -98,7 +134,8 @@ with t1:
 
 # --- TAB 2: PORTAFOGLIO ---
 with t2:
-    st.subheader("💼 Scommesse in Corso")
+    st.button("🔄 AGGIORNA RISULTATI", on_click=check_results, use_container_width=True)
+    st.divider()
     df_p = df_attuale[df_attuale['Esito'] == "Pendente"]
     if not df_p.empty:
         for i, r in df_p.iterrows():
@@ -126,7 +163,7 @@ with t3:
     m4.metric("📈 Netto", f"{prof_netto} €")
     
     st.divider()
-    st.write("### 💾 Gestione Backup")
+    # Backup Sezione
     exp_col, imp_col = st.columns(2)
     with exp_col:
         csv_data = df_attuale.to_csv(index=False).encode('utf-8')

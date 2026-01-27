@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, date
 from streamlit_gsheets import GSheetsConnection
 
 # --- CONFIGURAZIONE UI ---
-st.set_page_config(page_title="AI SNIPER V12.7 - Classic Style", layout="wide")
+st.set_page_config(page_title="AI SNIPER V12.8 - Compact Portfolio", layout="wide")
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 API_KEY = '01f1c8f2a314814b17de03eeb6c53623'
@@ -26,7 +26,8 @@ LEAGUE_NAMES = {
     "soccer_spain_la_liga": "🇪🇸 La Liga", 
     "soccer_germany_bundesliga": "🇩🇪 Bundesliga",
     "soccer_france_ligue_1": "🇫🇷 Ligue 1",
-    "soccer_uefa_europa_league": "🇪🇺 Europa League"
+    "soccer_uefa_europa_league": "🇪🇺 Europa League",
+    "soccer_uefa_champions_league": "🏆 Champions"
 }
 
 # --- MOTORE DATABASE ---
@@ -78,7 +79,7 @@ def check_results():
         st.rerun()
 
 # --- INTERFACCIA ---
-st.title("🎯 AI SNIPER V12.7")
+st.title("🎯 AI SNIPER V12.8")
 df_attuale = carica_db()
 
 with st.sidebar:
@@ -97,7 +98,7 @@ t1, t2, t3 = st.tabs(["🔍 SCANNER", "💼 PORTAFOGLIO", "📊 FISCALE"])
 with t1:
     leagues = {v: k for k, v in LEAGUE_NAMES.items()}
     c_sel, c_all = st.columns([2, 1])
-    sel_name = c_sel.selectbox("Campionato Singolo:", list(leagues.keys()) + ["🏆 Champions League"])
+    sel_name = c_sel.selectbox("Campionato Singolo:", list(leagues.keys()))
     
     if c_all.button("🚀 SCANSIONE TOTALE", use_container_width=True):
         all_found = []
@@ -115,7 +116,7 @@ with t1:
         st.rerun()
 
     if st.button("🔍 AVVIA SCANSIONE SINGOLA", use_container_width=True):
-        target_key = get_champions_key() if sel_name == "🏆 Champions League" else leagues[sel_name]
+        target_key = get_champions_key() if "Champions" in sel_name else leagues[sel_name]
         res = requests.get(f'https://api.the-odds-api.com/v4/sports/{target_key}/odds/', params={'api_key': API_KEY, 'regions': 'eu', 'markets': 'totals'})
         if res.status_code == 200:
             st.session_state['api_data'] = res.json()
@@ -133,7 +134,6 @@ with t1:
                     if b['title'] in BK_EURO_AUTH:
                         mk = next((x for x in b['markets'] if x['key'] == 'totals'), None)
                         if mk:
-                            # Fix float point per Champions
                             q_ov = next((o['price'] for o in mk['outcomes'] if o['name'] == 'Over' and float(o.get('point',0)) == 2.5), None)
                             q_un = next((o['price'] for o in mk['outcomes'] if o['name'] == 'Under' and float(o.get('point',0)) == 2.5), None)
                             if q_ov and q_un:
@@ -145,8 +145,7 @@ with t1:
                     if val >= soglia_val:
                         stk_c = round(max(2.0, min(budget_cassa * (val/(best['Q']-1)) * rischio, budget_cassa*0.15)), 2)
                         c_a, c_b = st.columns([3, 1])
-                        is_p = " ✅" if nome_m in pend_list else ""
-                        c_a.write(f"📅 {dt_m} | **{nome_m}** | {m['sport_title']} | {best['BK']} | Val: **{round(val*100,1)}%**")
+                        c_a.write(f"📅 {dt_m} | **{nome_m}** | {m['sport_title']} | Val: **{round(val*100,1)}%**")
                         if c_b.button(f"ADD @{best['Q']}", key=f"add_{i}", disabled=(nome_m in pend_list)):
                             nuova = pd.DataFrame([{"Data Match": dt_m, "Match": nome_m, "Scelta": best['T'], "Quota": best['Q'], "Stake": stk_c, "Bookmaker": best['BK'], "Esito": "Pendente", "Profitto": 0.0, "Sport_Key": m['sport_key'], "Risultato": "-"}])
                             salva_db(pd.concat([carica_db(), nuova], ignore_index=True))
@@ -154,23 +153,34 @@ with t1:
                         st.divider()
             except: continue
 
-# --- TAB 2: PORTAFOGLIO (STILE 11.40) ---
+# --- TAB 2: PORTAFOGLIO (COMPATTO + CAMPIONATO) ---
 with t2:
     st.button("🔄 AGGIORNA RISULTATI", on_click=check_results, use_container_width=True)
-    st.divider()
+    st.markdown("<br>", unsafe_allow_html=True)
     df_p = df_attuale[df_attuale['Esito'] == "Pendente"]
+    
     if not df_p.empty:
         for i, r in df_p.iterrows():
             vinc_p = round(r['Stake'] * r['Quota'], 2)
-            c1, c2 = st.columns([12, 1])
-            c1.warning(f"🏟️ **{r['Match']}** | {r['Scelta']} @**{r['Quota']}** | Stake: **{r['Stake']}€** | Vincita: **{vinc_p}€** | 🏦 {r['Bookmaker']}")
+            # Recupero nome campionato amichevole
+            league_name = LEAGUE_NAMES.get(r['Sport_Key'], r['Sport_Key'].replace("soccer_", "").replace("_", " ").title())
+            
+            c1, c2 = st.columns([15, 1])
+            # Layout super compatto con margini ridotti
+            c1.markdown(f"""
+                <div style='margin-bottom: -15px; border-left: 5px solid #ffc107; padding-left: 10px;'>
+                    <b>{r['Match']}</b> <span style='color: gray; font-size: 0.8em;'>({league_name})</span><br>
+                    <span style='font-size: 0.9em;'>{r['Scelta']} @<b>{r['Quota']}</b> | Stake: <b>{r['Stake']}€</b> | Vincita: <b>{vinc_p}€</b> | 🏦 {r['Bookmaker']}</span>
+                </div>
+                """, unsafe_allow_html=True)
             if c2.button("🗑️", key=f"del_{i}"):
                 salva_db(df_attuale.drop(i))
                 st.rerun()
-            st.divider()
-    else: st.write("Nessuna giocata pendente.")
+            st.markdown("<hr style='margin: 8px 0px; opacity: 0.2;'>", unsafe_allow_html=True)
+    else: 
+        st.info("Nessuna giocata pendente.")
 
-# --- TAB 3: FISCALE (STILE 11.40) ---
+# --- TAB 3: FISCALE (STILE CLASSICO) ---
 with t3:
     st.subheader("🏁 Cruscotto Finanziario")
     if not df_attuale.empty:

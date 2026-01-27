@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, date
 from streamlit_gsheets import GSheetsConnection
 
 # --- CONFIGURAZIONE UI ---
-st.set_page_config(page_title="AI SNIPER V12.5 - Full Power", layout="wide")
+st.set_page_config(page_title="AI SNIPER V12.6 - Classic Interface", layout="wide")
 conn = st.connection("gsheets", type=GSheetsConnection)
 API_KEY = '01f1c8f2a314814b17de03eeb6c53623'
 
@@ -74,7 +74,7 @@ def get_champions_key():
     except: return "soccer_uefa_champions_league"
 
 # --- INTERFACCIA ---
-st.title("🎯 AI SNIPER V12.5")
+st.title("🎯 AI SNIPER V12.6")
 df_attuale = carica_db()
 
 with st.sidebar:
@@ -83,13 +83,14 @@ with st.sidebar:
     c1.metric("Residui", st.session_state['api_usage']['remaining'])
     c2.metric("Usati", st.session_state['api_usage']['used'])
     st.divider()
+    # Personalizzazione basata sul tuo budget di 500€
     budget_cassa = st.number_input("Budget (€)", value=500.0)
     rischio = st.slider("Kelly Criterion", 0.05, 0.50, 0.20)
     soglia_val = st.slider("Valore Min %", 0, 15, 3) / 100
 
 t1, t2, t3 = st.tabs(["🔍 SCANNER", "💼 PORTAFOGLIO", "📊 FISCALE"])
 
-# --- TAB 1: SCANNER ---
+# --- TAB 1: SCANNER (Versione Potenziata) ---
 with t1:
     col_sel, col_btn, col_ore = st.columns([1, 1, 1])
     sel_name = col_sel.selectbox("Campionato Singolo:", list(LEAGUE_MAP.keys()) + ["🏆 Champions League"])
@@ -105,6 +106,7 @@ with t1:
             if res.status_code == 200:
                 all_data.extend(res.json())
                 st.session_state['api_usage']['remaining'] = res.headers.get('x-requests-remaining')
+                st.session_state['api_usage']['used'] = res.headers.get('x-requests-used')
             time.sleep(0.5)
             pbar.progress((idx + 1) / len(set(keys)))
         st.session_state['api_data'] = all_data
@@ -148,35 +150,68 @@ with t1:
                         st.divider()
             except: continue
 
-# --- TAB 2: PORTAFOGLIO ---
+# --- TAB 2: PORTAFOGLIO (Stile 11.40) ---
 with t2:
-    st.button("🔄 AGGIORNA RISULTATI", on_click=check_results, use_container_width=True)
+    st.subheader("💼 Giocate in Corso")
+    if st.button("🔄 AGGIORNA E VERIFICA ESITI", use_container_width=True):
+        check_results()
+    
     st.divider()
     df_p = df_attuale[df_attuale['Esito'] == "Pendente"]
+    
     if not df_p.empty:
         for i, r in df_p.iterrows():
-            c1, c2 = st.columns([15, 1])
-            c1.markdown(f"🟡 **{r['Match']}** | {r['Scelta']} @**{r['Quota']}** | Stake: **{r['Stake']}€**", unsafe_allow_html=True)
-            if c2.button("🗑️", key=f"del_{i}"):
-                salva_db(df_attuale.drop(i))
-                st.rerun()
-            st.markdown("<hr style='margin:2px 0px; border:0.1px solid #f0f2f6'>", unsafe_allow_html=True)
+            with st.container():
+                c1, c2, c3, c4 = st.columns([2, 3, 2, 1])
+                c1.write(f"📅 {r['Data Match']}")
+                c2.markdown(f"**{r['Match']}**")
+                c3.write(f"🎯 {r['Scelta']} @{r['Quota']} ({r['Stake']}€)")
+                if c4.button("🗑️", key=f"del_{i}"):
+                    df_attuale = df_attuale.drop(i)
+                    salva_db(df_attuale)
+                    st.rerun()
+                st.markdown("---")
+    else:
+        st.info("Nessuna scommessa pendente al momento.")
 
-# --- TAB 3: FISCALE ---
+# --- TAB 3: FISCALE (Stile 11.40) ---
 with t3:
+    st.subheader("📊 Analisi Performance")
+    
     if not df_attuale.empty:
-        tot_giocato = round(df_attuale['Stake'].sum(), 2)
-        prof_netto = round(df_attuale['Profitto'].sum(), 2)
-        m1, m2 = st.columns(2)
-        m1.metric("💰 Volume Totale", f"{tot_giocato} €")
-        m2.metric("📈 Profitto Netto", f"{prof_netto} €", delta=f"{prof_netto} €")
+        # Metriche principali
+        vinte = len(df_attuale[df_attuale['Esito'] == "VINTO"])
+        perse = len(df_attuale[df_attuale['Esito'] == "PERSO"])
+        totali = vinte + perse
+        win_rate = (vinte / totali * 100) if totali > 0 else 0
+        profitto_totale = df_attuale['Profitto'].sum()
+        
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Profitto Totale", f"{round(profitto_totale, 2)} €")
+        m2.metric("Win Rate", f"{round(win_rate, 1)} %")
+        m3.metric("Vinte", vinte)
+        m4.metric("Perse", perse)
         
         st.divider()
-        def color_row(row):
-            if row['Esito'] == "VINTO": return ['background-color: rgba(0, 255, 0, 0.1)'] * len(row)
-            if row['Esito'] == "PERSO": return ['background-color: rgba(255, 0, 0, 0.1)'] * len(row)
-            return [''] * len(row)
-        st.dataframe(df_attuale.style.apply(color_row, axis=1), use_container_width=True)
+        st.write("### Storico Giocate")
         
-        csv = df_attuale.to_csv(index=False).encode('utf-8')
-        st.download_button("📥 BACKUP CSV", data=csv, file_name=f"sniper_backup_{date.today()}.csv")
+        # Funzione di stile per la tabella
+        def color_esito(val):
+            if val == "VINTO": return 'color: #155724; background-color: #d4edda; font-weight: bold'
+            if val == "PERSO": return 'color: #721c24; background-color: #f8d7da; font-weight: bold'
+            return ''
+
+        # Visualizzazione tabella formattata
+        st.dataframe(
+            df_attuale.style.applymap(color_esito, subset=['Esito']),
+            use_container_width=True,
+            hide_index=True
+        )
+        
+        # Pulsante Reset (con cautela)
+        if st.checkbox("Mostra opzioni avanzate"):
+            if st.button("⚠️ RESET TOTALE DATABASE", type="primary"):
+                salva_db(pd.DataFrame(columns=df_attuale.columns))
+                st.rerun()
+    else:
+        st.warning("Database vuoto. Inizia a scansionare e aggiungere giocate!")

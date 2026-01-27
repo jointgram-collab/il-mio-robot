@@ -6,11 +6,12 @@ from datetime import datetime, timedelta, date
 from streamlit_gsheets import GSheetsConnection
 
 # --- CONFIGURAZIONE UI ---
-st.set_page_config(page_title="AI SNIPER V11.85 - Total European Radar", layout="wide")
+st.set_page_config(page_title="AI SNIPER V11.95 - Ultimate European Edition", layout="wide")
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 API_KEY = '01f1c8f2a314814b17de03eeb6c53623'
 
+# Inizializzazione sessione
 if 'api_usage' not in st.session_state:
     st.session_state['api_usage'] = {'remaining': "N/D", 'used': "N/D"}
 if 'api_data' not in st.session_state:
@@ -26,9 +27,9 @@ LEAGUE_NAMES = {
     "soccer_spain_la_liga": "🇪🇸 La Liga", 
     "soccer_germany_bundesliga": "🇩🇪 Bundesliga",
     "soccer_france_ligue_1": "🇫🇷 Ligue 1",
-    "soccer_uefa_champions_league": "🇪🇺 Champions League",
+    "soccer_uefa_champions_league": "🏆 Champions League",
     "soccer_uefa_europa_league": "🇪🇺 Europa League",
-    "soccer_uefa_europa_conference_league": "🇪🇺 Conference League"
+    "soccer_uefa_europa_conference_league": "🇪🇺 Conference"
 }
 
 # --- MOTORE DATABASE ---
@@ -69,7 +70,7 @@ def check_results():
         st.rerun()
 
 # --- INTERFACCIA ---
-st.title("🎯 AI SNIPER V11.85")
+st.title("🎯 AI SNIPER V11.95")
 df_attuale = carica_db()
 
 with st.sidebar:
@@ -79,7 +80,7 @@ with st.sidebar:
     c2.metric("Usati", st.session_state['api_usage']['used'])
     st.divider()
     budget_cassa = st.number_input("Budget (€)", value=500.0)
-    rischio = st.slider("Kelly", 0.05, 0.50, 0.20)
+    rischio = st.slider("Kelly Criterion", 0.05, 0.50, 0.20)
     soglia_val = st.slider("Valore Min %", 0, 15, 5) / 100
 
 t1, t2, t3 = st.tabs(["🔍 SCANNER", "💼 PORTAFOGLIO", "📊 FISCALE"])
@@ -92,26 +93,28 @@ with t1:
     sel_name = c_sel.selectbox("Campionato Singolo:", list(leagues_map.keys()))
     ore_ricerca = c_slider.select_slider("Finestra (ore):", options=[24, 48, 72, 96, 120], value=120)
     
+    # PULSANTE SCANSIONE TOTALE (SEQUENZIALE)
     if c_btn_all.button("🚀 SCANSIONE TOTALE (EU)", use_container_width=True):
         all_found = []
         progress = st.progress(0)
-        status = st.empty()
+        status_msg = st.empty()
         
         for idx, (l_key, l_name) in enumerate(LEAGUE_NAMES.items()):
-            status.text(f"Scansione: {l_name}...")
+            status_msg.text(f"Scansione: {l_name}...")
             try:
                 r = requests.get(f'https://api.the-odds-api.com/v4/sports/{l_key}/odds/', 
                                params={'api_key': API_KEY, 'regions': 'eu', 'markets': 'totals'}, timeout=15)
                 if r.status_code == 200:
                     all_found.extend(r.json())
                     st.session_state['api_usage']['remaining'] = r.headers.get('x-requests-remaining')
-                time.sleep(0.5) 
+                    st.session_state['api_usage']['used'] = r.headers.get('x-requests-used')
+                time.sleep(0.6) # Pausa per stabilità
             except:
-                st.error(f"Errore su {l_name}")
+                st.error(f"Errore tecnico su {l_name}")
             progress.progress((idx + 1) / len(LEAGUE_NAMES))
         
         st.session_state['api_data'] = all_found
-        status.success(f"Analisi completata: {len(all_found)} match in memoria.")
+        status_msg.success(f"Analisi completata! {len(all_found)} match pronti.")
         st.rerun()
 
     if c_sel.button("🔍 Scansiona Singolo", use_container_width=True):
@@ -123,6 +126,7 @@ with t1:
 
     st.divider()
 
+    # Visualizzazione Risultati
     if st.session_state['api_data']:
         now = datetime.utcnow()
         limit = now + timedelta(hours=ore_ricerca)
@@ -143,6 +147,7 @@ with t1:
                     if b['title'] in BK_EURO_AUTH:
                         mk = next((x for x in b['markets'] if x['key'] == 'totals'), None)
                         if mk:
+                            # Cerchiamo Over 2.5
                             q_ov = next((o['price'] for o in mk['outcomes'] if o['name'] == 'Over' and o['point'] == 2.5), None)
                             q_un = next((o['price'] for o in mk['outcomes'] if o['name'] == 'Under' and o['point'] == 2.5), None)
                             if q_ov and q_un:
@@ -158,7 +163,7 @@ with t1:
                         stk_c = round(max(2.0, min(budget_cassa * (val/(best['Q']-1)) * rischio, budget_cassa*0.15)), 2)
                         c_info, c_add = st.columns([3, 1])
                         
-                        camp_label = LEAGUE_NAMES.get(sport_key, "🏆 Cup/Other")
+                        camp_label = LEAGUE_NAMES.get(sport_key, "🏆 Coppa/Altro")
                         is_p = " ✅" if nome_m in pend_list else ""
                         
                         c_info.markdown(f"📅 {dt_m} | **{nome_m}** <br>🏆 <small>{camp_label}</small> | **{best['BK']}** | Val: **{round(val*100,1)}%**{is_p}", unsafe_allow_html=True)
@@ -169,9 +174,9 @@ with t1:
                         st.divider()
             except: continue
         
-        if not found_valore: st.warning("Nessun match di valore trovato con questi filtri.")
+        if not found_valore: st.info("Nessuna opportunità trovata con la soglia di valore attuale.")
 
-# --- TAB 2: PORTAFOGLIO ---
+# --- TAB 2: PORTAFOGLIO (COMPATTO) ---
 with t2:
     st.button("🔄 AGGIORNA RISULTATI", on_click=check_results, key="btn_check_port")
     st.divider()
@@ -182,7 +187,7 @@ with t2:
             camp = LEAGUE_NAMES.get(r['Sport_Key'], r['Sport_Key'])
             c_p1, c_p2 = st.columns([15, 1])
             with c_p1:
-                st.markdown(f"🟡 **{r['Match']}** <small>({camp})</small> | {r['Scelta']} @**{r['Quota']}** | Stake: **{r['Stake']}€** | Vincita: **{vinc_p}€**", unsafe_allow_html=True)
+                st.markdown(f"🟡 **{r['Match']}** <small>({camp})</small> | {r['Scelta']} @**{r['Quota']}** | Stake: **{r['Stake']}€** | Vincita: **{vinc_p}€** | 🏦 <small>{r['Bookmaker']}</small>", unsafe_allow_html=True)
             with c_p2:
                 if st.button("🗑️", key=f"del_p_{i}"):
                     salva_db(df_attuale.drop(i))
@@ -209,3 +214,8 @@ with t3:
             return [''] * len(row)
             
         st.dataframe(df_attuale.style.apply(color_row, axis=1), use_container_width=True)
+        
+        st.divider()
+        # Backup
+        csv = df_attuale.to_csv(index=False).encode('utf-8')
+        st.download_button("📥 Scarica Backup CSV", data=csv, file_name=f"sniper_backup_{date.today()}.csv")

@@ -5,7 +5,7 @@ from datetime import datetime, date
 from streamlit_gsheets import GSheetsConnection
 
 # --- CONFIGURAZIONE UI ---
-st.set_page_config(page_title="AI SNIPER V11.40 - Visual Fiscale", layout="wide")
+st.set_page_config(page_title="AI SNIPER V11.40 - Executive", layout="wide")
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 API_KEY = '01f1c8f2a314814b17de03eeb6c53623'
@@ -53,7 +53,7 @@ with st.sidebar:
 
 t1, t2, t3 = st.tabs(["🔍 SCANNER", "💼 PORTAFOGLIO", "📊 FISCALE"])
 
-# --- TAB 1: SCANNER ---
+# --- TAB 1 & 2 (Invariati) ---
 with t1:
     leagues = {v: k for k, v in LEAGUE_NAMES.items()}
     sel_name = st.selectbox("Campionato:", list(leagues.keys()))
@@ -64,7 +64,6 @@ with t1:
             st.session_state['api_usage']['used'] = res.headers.get('x-requests-used', "N/D")
             st.session_state['api_data'] = res.json()
             st.rerun()
-
     if st.session_state['api_data']:
         pend_list = df_attuale[df_attuale['Esito'] == "Pendente"]['Match'].tolist()
         for m in st.session_state['api_data']:
@@ -95,7 +94,6 @@ with t1:
                         st.divider()
             except: continue
 
-# --- TAB 2: PORTAFOGLIO ---
 with t2:
     df_p = df_attuale[df_attuale['Esito'] == "Pendente"]
     if not df_p.empty:
@@ -108,22 +106,33 @@ with t2:
                 st.rerun()
     else: st.write("Nessuna giocata pendente.")
 
-# --- TAB 3: FISCALE ---
+# --- TAB 3: FISCALE CON CRUSCOTTO ---
 with t3:
-    st.subheader("📊 Analisi Profitti")
-    p_tot = round(df_attuale['Profitto'].sum(), 2)
-    st.metric("Profitto Netto", f"{p_tot} €", delta=f"{round((p_tot/TARGET_FINALE)*100, 1)}% del target")
-    st.progress(min(1.0, max(0.0, p_tot / TARGET_FINALE)))
+    st.subheader("🏁 Cruscotto Finanziario")
     
-    # --- LOGICA COLORI ---
+    # Calcolo dati per il cruscotto
+    tot_giocato = round(df_attuale['Stake'].sum(), 2)
+    tot_vinto = round(df_attuale[df_attuale['Esito'] == "VINTO"]['Profitto'].sum() + df_attuale[df_attuale['Esito'] == "VINTO"]['Stake'].sum(), 2)
+    tot_perso = round(df_attuale[df_attuale['Esito'] == "PERSO"]['Stake'].sum(), 2)
+    prof_netto = round(df_attuale['Profitto'].sum(), 2)
+    
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("💰 Totale Giocato", f"{tot_giocato} €")
+    m2.metric("✅ Totale Vinto (Lordo)", f"{tot_vinto} €")
+    m3.metric("❌ Totale Perso", f"{tot_perso} €")
+    m4.metric("📈 Profitto Netto", f"{prof_netto} €", delta=f"{prof_netto} €")
+    
+    st.divider()
+    st.write("### Progresso Target 5000€")
+    st.progress(min(1.0, max(0.0, prof_netto / TARGET_FINALE)))
+    
     def color_row(row):
-        if row['Esito'] == "VINTO": return ['background-color: rgba(0, 255, 0, 0.2)'] * len(row)
-        if row['Esito'] == "PERSO": return ['background-color: rgba(255, 0, 0, 0.2)'] * len(row)
-        if row['Esito'] == "Pendente": return ['background-color: rgba(255, 255, 0, 0.2)'] * len(row)
+        if row['Esito'] == "VINTO": return ['background-color: rgba(0, 255, 0, 0.15)'] * len(row)
+        if row['Esito'] == "PERSO": return ['background-color: rgba(255, 0, 0, 0.15)'] * len(row)
+        if row['Esito'] == "Pendente": return ['background-color: rgba(255, 255, 0, 0.15)'] * len(row)
         return [''] * len(row)
 
     if not df_attuale.empty:
         st.write("### Storico Operazioni")
-        # Visualizziamo solo le colonne importanti
         view_df = df_attuale[["Data Match", "Match", "Scelta", "Quota", "Stake", "Esito", "Profitto", "Risultato", "Bookmaker"]]
         st.dataframe(view_df.sort_index(ascending=False).style.apply(color_row, axis=1), use_container_width=True)

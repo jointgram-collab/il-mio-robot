@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, date
 from streamlit_gsheets import GSheetsConnection
 
 # --- CONFIGURAZIONE UI ---
-st.set_page_config(page_title="AI SNIPER V12.8 - Compact Portfolio", layout="wide")
+st.set_page_config(page_title="AI SNIPER V12.9 - Ultra Compact", layout="wide")
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 API_KEY = '01f1c8f2a314814b17de03eeb6c53623'
@@ -79,7 +79,7 @@ def check_results():
         st.rerun()
 
 # --- INTERFACCIA ---
-st.title("🎯 AI SNIPER V12.8")
+st.title("🎯 AI SNIPER V12.9")
 df_attuale = carica_db()
 
 with st.sidebar:
@@ -153,7 +153,7 @@ with t1:
                         st.divider()
             except: continue
 
-# --- TAB 2: PORTAFOGLIO (COMPATTO + CAMPIONATO) ---
+# --- TAB 2: PORTAFOGLIO (SINGLE LINE COMPACT) ---
 with t2:
     st.button("🔄 AGGIORNA RISULTATI", on_click=check_results, use_container_width=True)
     st.markdown("<br>", unsafe_allow_html=True)
@@ -162,21 +162,18 @@ with t2:
     if not df_p.empty:
         for i, r in df_p.iterrows():
             vinc_p = round(r['Stake'] * r['Quota'], 2)
-            # Recupero nome campionato amichevole
-            league_name = LEAGUE_NAMES.get(r['Sport_Key'], r['Sport_Key'].replace("soccer_", "").replace("_", " ").title())
+            league_name = LEAGUE_NAMES.get(r['Sport_Key'], r['Sport_Key'].split("_")[-1].upper())
             
-            c1, c2 = st.columns([15, 1])
-            # Layout super compatto con margini ridotti
+            c1, c2 = st.columns([18, 1])
+            # Layout su una singola riga con evento in grassetto
             c1.markdown(f"""
-                <div style='margin-bottom: -15px; border-left: 5px solid #ffc107; padding-left: 10px;'>
-                    <b>{r['Match']}</b> <span style='color: gray; font-size: 0.8em;'>({league_name})</span><br>
-                    <span style='font-size: 0.9em;'>{r['Scelta']} @<b>{r['Quota']}</b> | Stake: <b>{r['Stake']}€</b> | Vincita: <b>{vinc_p}€</b> | 🏦 {r['Bookmaker']}</span>
+                <div style='background-color: rgba(255, 193, 7, 0.1); padding: 5px 10px; border-radius: 5px; margin-bottom: 2px; border-left: 4px solid #ffc107;'>
+                    <b>{r['Match']}</b> ({league_name}) | <b>{r['Scelta']}</b> @{r['Quota']} | Stake: {r['Stake']}€ | Vincita: {vinc_p}€ | 🏦 {r['Bookmaker']}
                 </div>
                 """, unsafe_allow_html=True)
             if c2.button("🗑️", key=f"del_{i}"):
                 salva_db(df_attuale.drop(i))
                 st.rerun()
-            st.markdown("<hr style='margin: 8px 0px; opacity: 0.2;'>", unsafe_allow_html=True)
     else: 
         st.info("Nessuna giocata pendente.")
 

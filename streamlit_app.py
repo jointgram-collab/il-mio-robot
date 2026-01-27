@@ -124,23 +124,40 @@ with t1:
                         st.divider()
             except: continue
 
-# --- TAB 2: PORTAFOGLIO ---
+# --- TAB 2: PORTAFOGLIO (Versione Ultra-Compact) ---
 with t2:
     st.button("🔄 AGGIORNA RISULTATI", on_click=check_results, use_container_width=True)
-    st.divider()
+    st.write("") # Piccolo spazio sotto il pulsante
+    
     df_p = df_attuale[df_attuale['Esito'] == "Pendente"]
     if not df_p.empty:
         for i, r in df_p.iterrows():
             vinc_p = round(r['Stake'] * r['Quota'], 2)
-            camp = LEAGUE_NAMES.get(r['Sport_Key'], r['Sport_Key']) # Recupera nome campionato
-            c1, c2 = st.columns([12, 1])
-            # Aggiunto il campionato nella riga singola
-            c1.warning(f"🏟️ **{r['Match']}** ({camp}) | {r['Scelta']} @**{r['Quota']}** | Stake: **{r['Stake']}€** | Vincita: **{vinc_p}€** | 🏦 {r['Bookmaker']}")
-            if c2.button("🗑️", key=f"del_{i}"):
-                salva_db(df_attuale.drop(i))
-                st.rerun()
-            st.divider()
-    else: st.write("Nessuna giocata pendente.")
+            camp = LEAGUE_NAMES.get(r['Sport_Key'], r['Sport_Key'])
+            
+            # Layout a colonna singola con markdown per ridurre i margini verticali
+            col_info, col_del = st.columns([15, 1])
+            
+            with col_info:
+                # Testo compatto su riga singola
+                st.markdown(
+                    f"🟡 **{r['Match']}** <small>({camp})</small> | "
+                    f"{r['Scelta']} @**{r['Quota']}** | "
+                    f"Stake: **{r['Stake']}€** | "
+                    f"Vincita: **{vinc_p}€** | "
+                    f"🏦 <small>{r['Bookmaker']}</small>", 
+                    unsafe_allow_html=True
+                )
+            
+            with col_del:
+                if st.button("🗑️", key=f"del_{i}", help="Elimina giocata"):
+                    salva_db(df_attuale.drop(i))
+                    st.rerun()
+            
+            # Divider molto sottile per separare le righe
+            st.markdown("<hr style='margin:2px 0px; border:0.1px solid #f0f2f6'>", unsafe_allow_html=True)
+    else:
+        st.info("Nessuna giocata pendente.")
 
 # --- TAB 3: FISCALE ---
 with t3:

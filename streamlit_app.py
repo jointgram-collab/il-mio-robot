@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, date
 from streamlit_gsheets import GSheetsConnection
 
 # --- CONFIGURAZIONE UI ---
-st.set_page_config(page_title="AI SNIPER V13.1", layout="wide")
+st.set_page_config(page_title="AI SNIPER V13.2", layout="wide")
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 API_KEY = '01f1c8f2a314814b17de03eeb6c53623'
@@ -79,7 +79,7 @@ def check_results():
         st.rerun()
 
 # --- INTERFACCIA ---
-st.title("🎯 AI SNIPER V13.1")
+st.title("🎯 AI SNIPER V13.2")
 df_attuale = carica_db()
 
 with st.sidebar:
@@ -143,11 +143,8 @@ with t1:
                         if mk:
                             q_ov = next((o['price'] for o in mk['outcomes'] if o['name'] == 'Over' and float(o.get('point',0)) == 2.5), None)
                             q_un = next((o['price'] for o in mk['outcomes'] if o['name'] == 'Under' and float(o.get('point',0)) == 2.5), None)
-                            if q_ov:
-                                margin_ov = (1/q_ov) + 0.48 # Stima probabilità approssimativa per valore
-                                opts.append({"T": "OVER 2.5", "Q": q_ov, "P": (1/q_ov)+0.06, "BK": b['title']})
-                            if q_un:
-                                opts.append({"T": "UNDER 2.5", "Q": q_un, "P": (1/q_un)+0.06, "BK": b['title']})
+                            if q_ov: opts.append({"T": "OVER 2.5", "Q": q_ov, "P": (1/q_ov)+0.06, "BK": b['title']})
+                            if q_un: opts.append({"T": "UNDER 2.5", "Q": q_un, "P": (1/q_un)+0.06, "BK": b['title']})
                 
                 if opts:
                     best = max(opts, key=lambda x: (x['P'] * x['Q']) - 1)
@@ -155,7 +152,6 @@ with t1:
                     if val >= soglia_val:
                         stk_c = round(max(2.0, min(budget_cassa * (val/(best['Q']-1)) * rischio, budget_cassa*0.15)), 2)
                         c_a, c_b = st.columns([3, 1])
-                        # AGGIORNATO: Visualizzazione Scelta e Stake nello Scanner
                         c_a.markdown(f"📅 {dt_m} | **{nome_m}** | {m['sport_title']}<br>🎯 Giocata: **{best['T']}** @{best['Q']} | Stake: **{stk_c}€** | Val: **{round(val*100,1)}%** | 🏦 {best['BK']}", unsafe_allow_html=True)
                         if c_b.button(f"ADD", key=f"add_{i}", disabled=(nome_m in pend_list), use_container_width=True):
                             nuova = pd.DataFrame([{"Data Match": dt_m, "Match": nome_m, "Scelta": best['T'], "Quota": best['Q'], "Stake": stk_c, "Bookmaker": best['BK'], "Esito": "Pendente", "Profitto": 0.0, "Sport_Key": m['sport_key'], "Risultato": "-"}])
@@ -164,11 +160,35 @@ with t1:
                         st.divider()
             except: continue
 
-# --- TAB 2: PORTAFOGLIO ---
+# --- TAB 2: PORTAFOGLIO (CON INFO RIEPILOGO) ---
 with t2:
+    df_p = df_attuale[df_attuale['Esito'] == "Pendente"]
+    
+    # --- TESTATA RIEPILOGO ---
+    if not df_p.empty:
+        tot_impegnato = round(df_p['Stake'].sum(), 2)
+        ritorno_potenziale = round((df_p['Stake'] * df_p['Quota']).sum(), 2)
+        
+        st.markdown(f"""
+            <div style='background-color: #0e1117; padding: 15px; border-radius: 10px; border: 1px solid #30363d; margin-bottom: 20px;'>
+                <table style='width: 100%; border: none;'>
+                    <tr>
+                        <td style='text-align: center; border: none;'>
+                            <span style='color: gray; font-size: 0.9em;'>💰 TOTALE IMPEGNATO</span><br>
+                            <span style='font-size: 1.5em; font-weight: bold; color: #ffc107;'>{tot_impegnato} €</span>
+                        </td>
+                        <td style='text-align: center; border: none; border-left: 1px solid #30363d;'>
+                            <span style='color: gray; font-size: 0.9em;'>🚀 RITORNO POTENZIALE</span><br>
+                            <span style='font-size: 1.5em; font-weight: bold; color: #00ff00;'>{ritorno_potenziale} €</span>
+                        </td>
+                    </tr>
+                </table>
+            </div>
+            """, unsafe_allow_html=True)
+    
     st.button("🔄 AGGIORNA RISULTATI", on_click=check_results, use_container_width=True)
     st.markdown("<br>", unsafe_allow_html=True)
-    df_p = df_attuale[df_attuale['Esito'] == "Pendente"]
+    
     if not df_p.empty:
         for i, r in df_p.iterrows():
             vinc_p = round(r['Stake'] * r['Quota'], 2)
@@ -182,7 +202,8 @@ with t2:
             if c2.button("🗑️", key=f"del_{i}"):
                 salva_db(df_attuale.drop(i))
                 st.rerun()
-    else: st.info("Nessuna giocata pendente.")
+    else: 
+        st.info("Nessuna giocata pendente.")
 
 # --- TAB 3: FISCALE ---
 with t3:
@@ -201,7 +222,7 @@ with t3:
         col_exp, col_imp = st.columns(2)
         with col_exp:
             csv_data = df_attuale.to_csv(index=False).encode('utf-8')
-            st.download_button("📥 SCARICA CSV BACKUP", data=csv_data, file_name=f"sniper_backup_{date.today()}.csv", use_container_width=True)
+            st.download_button("📥 SCARICA CSV", data=csv_data, file_name=f"sniper_backup_{date.today()}.csv", use_container_width=True)
         with col_imp:
             up_file = st.file_uploader("Carica Backup CSV", type="csv")
             if up_file and st.button("🔄 RIPRISTINA", use_container_width=True):

@@ -19,11 +19,18 @@ BK_EURO_AUTH = {
     "William Hill": "https://www.williamhill.it", "888sport": "https://www.888sport.it"
 }
 
+# --- AGGIORNATI CAMPIONATI: OLANDA E INGHILTERRA ---
 LEAGUE_NAMES = {
-    "soccer_italy_serie_a": "🇮🇹 Serie A", "soccer_italy_serie_b": "🇮🇹 Serie B",
-    "soccer_england_league_1": "🏴󠁧󠁢󠁥󠁮󠁧󠁿 Premier League", "soccer_spain_la_liga": "🇪🇸 La Liga",
-    "soccer_germany_bundesliga": "🇩🇪 Bundesliga", "soccer_uefa_champions_league": "🇪🇺 Champions",
-    "soccer_uefa_europa_league": "🇪🇺 Europa League", "soccer_france_ligue_1": "🇫🇷 Ligue 1"
+    "soccer_italy_serie_a": "🇮🇹 Serie A", 
+    "soccer_italy_serie_b": "🇮🇹 Serie B",
+    "soccer_epl": "🏴󠁧󠁢󠁥󠁮󠁧󠁿 Premier League", 
+    "soccer_england_efl_championship": "🏴󠁧󠁢󠁥󠁮󠁧󠁿 Championship",
+    "soccer_netherlands_eredivisie": "🇳🇱 Eredivisie",
+    "soccer_spain_la_liga": "🇪🇸 La Liga",
+    "soccer_germany_bundesliga": "🇩🇪 Bundesliga", 
+    "soccer_uefa_champions_league": "🇪🇺 Champions",
+    "soccer_uefa_europa_league": "🇪🇺 Europa League", 
+    "soccer_france_ligue_1": "🇫🇷 Ligue 1"
 }
 
 # --- MOTORE DATABASE ---
@@ -97,7 +104,9 @@ with t1:
     
     if st.button("🚀 SCANSIONA"):
         res = requests.get(f'https://api.the-odds-api.com/v4/sports/{leagues[sel_name]}/odds/', params={'api_key': API_KEY, 'regions': 'eu', 'markets': 'totals'})
-        if res.status_code == 200: st.session_state['api_data'] = res.json()
+        if res.status_code == 200: 
+            st.session_state['api_data'] = res.json()
+            st.sidebar.success(f"Crediti residui: {res.headers.get('x-requests-remaining')}")
 
     if st.session_state['api_data']:
         for m in st.session_state['api_data']:
@@ -164,7 +173,6 @@ with t3:
     st.subheader("📊 Analisi Fiscale")
     df_f = carica_db()
     if not df_f.empty:
-        # Calcoli Goal Tracker
         tot_scommesso = round(df_f['Stake'].sum(), 2)
         tot_vinto_lordo = round(df_f[df_f['Esito'] == "VINTO"]['Profitto'].sum() + df_f[df_f['Esito'] == "VINTO"]['Stake'].sum(), 2)
         profitto_netto = round(tot_vinto_lordo - tot_scommesso, 2)
@@ -180,13 +188,14 @@ with t3:
         st.divider()
 
         df_valid = df_f.dropna(subset=['dt_obj'])
-        s_range = st.date_input("Filtra Periodo:", [df_valid['dt_obj'].min().date() if not df_valid.empty else date.today(), date.today()])
-        if len(s_range) == 2:
-            df_fil = df_f[(df_f['dt_obj'].dt.date >= s_range[0]) & (df_f['dt_obj'].dt.date <= s_range[1])].sort_index(ascending=False)
-            for i, row in df_fil.iterrows():
-                camp = LEAGUE_NAMES.get(row['Sport_Key'], "Vari")
-                v_pot = round(row['Stake'] * row['Quota'], 2)
-                dati = f"{row['Data Match']} | {camp} | **{row['Match']}** | **{row['Scelta']} @{row['Quota']}**"
-                if row['Esito'] == "VINTO": st.success(f"🟢 VINTO | {dati} | Score: {row['Risultato']} | +{row['Profitto']}€")
-                elif row['Esito'] == "PERSO": st.error(f"🔴 PERSO | {dati} | Score: {row['Risultato']} | {row['Profitto']}€")
-                else: st.warning(f"🟡 PENDENTE | {dati} | 💰 Possibile Vincita: **{v_pot}€**")
+        if not df_valid.empty:
+            s_range = st.date_input("Filtra Periodo:", [df_valid['dt_obj'].min().date(), date.today()])
+            if len(s_range) == 2:
+                df_fil = df_f[(df_f['dt_obj'].dt.date >= s_range[0]) & (df_f['dt_obj'].dt.date <= s_range[1])].sort_index(ascending=False)
+                for i, row in df_fil.iterrows():
+                    camp = LEAGUE_NAMES.get(row['Sport_Key'], "Vari")
+                    v_pot = round(row['Stake'] * row['Quota'], 2)
+                    dati = f"{row['Data Match']} | {camp} | **{row['Match']}** | **{row['Scelta']} @{row['Quota']}**"
+                    if row['Esito'] == "VINTO": st.success(f"🟢 VINTO | {dati} | Score: {row['Risultato']} | +{row['Profitto']}€")
+                    elif row['Esito'] == "PERSO": st.error(f"🔴 PERSO | {dati} | Score: {row['Risultato']} | {row['Profitto']}€")
+                    else: st.warning(f"🟡 PENDENTE | {dati} | 💰 Possibile Vincita: **{v_pot}€**")

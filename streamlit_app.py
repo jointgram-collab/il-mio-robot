@@ -5,7 +5,7 @@ from datetime import datetime, date
 from streamlit_gsheets import GSheetsConnection
 
 # --- CONFIGURAZIONE UI ---
-st.set_page_config(page_title="AI SNIPER V11.40 - Streamlined", layout="wide")
+st.set_page_config(page_title="AI SNIPER V11.40 - Full Info", layout="wide")
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 API_KEY = '01f1c8f2a314814b17de03eeb6c53623'
@@ -108,12 +108,17 @@ with t1:
                     best = max(opts, key=lambda x: (x['P'] * x['Q']) - 1)
                     val = (best['P'] * best['Q']) - 1
                     if val >= soglia_val:
+                        # CALCOLO STAKE PREVENTIVO PER LO SCANNER
+                        stk_consigliato = round(max(2.0, min(budget_cassa * (val/(best['Q']-1)) * rischio, budget_cassa*0.15)), 2)
+                        
                         c_a, c_b = st.columns([3, 1])
                         is_p = " ✅" if nome_m in pend_list else ""
-                        c_a.write(f"📅 {dt_m} | **{nome_m}** | {best['BK']} | Val: **{round(val*100,1)}%**{is_p}")
+                        
+                        # AGGIUNTO STAKE NEL TESTO
+                        c_a.write(f"📅 {dt_m} | **{nome_m}** | {best['BK']} | Val: **{round(val*100,1)}%** | Suggerito: **{stk_consigliato}€**{is_p}")
+                        
                         if c_b.button(f"ADD @{best['Q']}", key=f"add_{nome_m}", disabled=(nome_m in pend_list)):
-                            stk = round(max(2.0, min(budget_cassa * (val/(best['Q']-1)) * rischio, budget_cassa*0.15)), 2)
-                            nuova = pd.DataFrame([{"Data Match": dt_m, "Match": nome_m, "Scelta": best['T'], "Quota": best['Q'], "Stake": stk, "Bookmaker": best['BK'], "Esito": "Pendente", "Profitto": 0.0, "Sport_Key": leagues[sel_name], "Risultato": "-"}])
+                            nuova = pd.DataFrame([{"Data Match": dt_m, "Match": nome_m, "Scelta": best['T'], "Quota": best['Q'], "Stake": stk_consigliato, "Bookmaker": best['BK'], "Esito": "Pendente", "Profitto": 0.0, "Sport_Key": leagues[sel_name], "Risultato": "-"}])
                             salva_db(pd.concat([carica_db(), nuova], ignore_index=True))
                             st.rerun()
                         st.divider()
@@ -127,7 +132,6 @@ with t2:
         for i, r in df_p.iterrows():
             vinc_p = round(r['Stake'] * r['Quota'], 2)
             c1, c2 = st.columns([12, 1])
-            # Riga singola compatta
             c1.markdown(f"🏟️ **{r['Match']}** | {r['Scelta']} @**{r['Quota']}** | Stake: **{r['Stake']}€** | Vincita: **{vinc_p}€** | 🏦 {r['Bookmaker']}")
             if c2.button("🗑️", key=f"del_{i}"):
                 salva_db(df_attuale.drop(i))

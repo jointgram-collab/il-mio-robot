@@ -5,7 +5,7 @@ from datetime import datetime, date, timedelta
 from streamlit_gsheets import GSheetsConnection
 
 # --- CONFIGURAZIONE UI ---
-st.set_page_config(page_title="AI SNIPER V11.39 - Full Empire", layout="wide")
+st.set_page_config(page_title="AI SNIPER V11.40 - Safe Guard", layout="wide")
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 API_KEY = '01f1c8f2a314814b17de03eeb6c53623'
@@ -19,7 +19,6 @@ BK_EURO_AUTH = {
     "William Hill": "https://www.williamhill.it", "888sport": "https://www.888sport.it"
 }
 
-# --- AGGIORNATI CAMPIONATI: OLANDA E INGHILTERRA ---
 LEAGUE_NAMES = {
     "soccer_italy_serie_a": "🇮🇹 Serie A", 
     "soccer_italy_serie_b": "🇮🇹 Serie B",
@@ -75,7 +74,7 @@ def check_results():
     if cambiamenti: salva_db(df); st.rerun()
 
 # --- INTERFACCIA ---
-st.title("🎯 AI SNIPER V11.39")
+st.title("🎯 AI SNIPER V11.40")
 if 'api_data' not in st.session_state: st.session_state['api_data'] = []
 
 t1, t2, t3 = st.tabs(["🔍 SCANNER", "💼 PORTAFOGLIO", "📊 FISCALE"])
@@ -106,7 +105,6 @@ with t1:
         res = requests.get(f'https://api.the-odds-api.com/v4/sports/{leagues[sel_name]}/odds/', params={'api_key': API_KEY, 'regions': 'eu', 'markets': 'totals'})
         if res.status_code == 200: 
             st.session_state['api_data'] = res.json()
-            st.sidebar.success(f"Crediti residui: {res.headers.get('x-requests-remaining')}")
 
     if st.session_state['api_data']:
         for m in st.session_state['api_data']:
@@ -168,10 +166,43 @@ with t2:
             salva_db(df_p.drop(i)); st.rerun()
         st.divider()
 
-# --- TAB 3: FISCALE ---
+# --- TAB 3: FISCALE & BACKUP ---
 with t3:
     st.subheader("📊 Analisi Fiscale")
     df_f = carica_db()
+    
+    # --- SEZIONE BACKUP (Download e Upload) ---
+    col_down, col_up = st.columns(2)
+    
+    with col_down:
+        st.markdown("### 📥 Esporta Dati")
+        if not df_f.empty:
+            csv_data = df_f.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="SCARICA BACKUP CSV",
+                data=csv_data,
+                file_name=f"sniper_backup_{date.today()}.csv",
+                mime='text/csv',
+                use_container_width=True
+            )
+        else:
+            st.write("Nessun dato da scaricare.")
+
+    with col_up:
+        st.markdown("### 📤 Ripristino Dati")
+        uploaded_file = st.file_uploader("Trascina qui il file CSV per il ripristino", type="csv")
+        if uploaded_file is not None:
+            if st.button("⚠️ CONFERMA RIPRISTINO (Sovrascrive Cloud)", use_container_width=True):
+                try:
+                    df_restore = pd.read_csv(uploaded_file)
+                    salva_db(df_restore)
+                    st.success("✅ Dati ripristinati con successo nel Cloud!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Errore nel ripristino: {e}")
+
+    st.divider()
+
     if not df_f.empty:
         tot_scommesso = round(df_f['Stake'].sum(), 2)
         tot_vinto_lordo = round(df_f[df_f['Esito'] == "VINTO"]['Profitto'].sum() + df_f[df_f['Esito'] == "VINTO"]['Stake'].sum(), 2)

@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, date
 from streamlit_gsheets import GSheetsConnection
 
 # --- CONFIGURAZIONE UI ---
-st.set_page_config(page_title="AI SNIPER V13.2", layout="wide")
+st.set_page_config(page_title="AI SNIPER V13.3", layout="wide")
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 API_KEY = '01f1c8f2a314814b17de03eeb6c53623'
@@ -42,15 +42,6 @@ def salva_db(df):
     conn.update(worksheet="Giocate", data=df)
     st.cache_data.clear()
 
-def get_champions_key():
-    try:
-        r = requests.get(f'https://api.the-odds-api.com/v4/sports/?api_key={API_KEY}')
-        if r.status_code == 200:
-            for s in r.json():
-                if "Champions League" in s.get('title', ''): return s.get('key')
-        return "soccer_uefa_champions_league"
-    except: return "soccer_uefa_champions_league"
-
 def check_results():
     df = carica_db()
     pendenti = df[df['Esito'] == "Pendente"]
@@ -79,7 +70,7 @@ def check_results():
         st.rerun()
 
 # --- INTERFACCIA ---
-st.title("🎯 AI SNIPER V13.2")
+st.title("🎯 AI SNIPER V13.3")
 df_attuale = carica_db()
 
 with st.sidebar:
@@ -104,7 +95,6 @@ with t1:
     if c_all.button("🚀 SCANSIONE TOTALE", use_container_width=True):
         all_found = []
         keys_to_scan = list(LEAGUE_NAMES.keys())
-        keys_to_scan.append(get_champions_key())
         pbar = st.progress(0)
         limit_date = datetime.utcnow() + timedelta(hours=ore_limite)
         
@@ -119,16 +109,6 @@ with t1:
             pbar.progress((idx + 1) / len(set(keys_to_scan)))
         st.session_state['api_data'] = all_found
         st.rerun()
-
-    if st.button("🔍 AVVIA SCANSIONE SINGOLA", use_container_width=True):
-        target_key = get_champions_key() if "Champions" in sel_name else leagues[sel_name]
-        res = requests.get(f'https://api.the-odds-api.com/v4/sports/{target_key}/odds/', params={'api_key': API_KEY, 'regions': 'eu', 'markets': 'totals'})
-        if res.status_code == 200:
-            data = res.json()
-            limit_date = datetime.utcnow() + timedelta(hours=ore_limite)
-            st.session_state['api_data'] = [m for m in data if datetime.strptime(m['commence_time'], "%Y-%m-%dT%H:%M:%SZ") <= limit_date]
-            st.session_state['api_usage']['remaining'] = res.headers.get('x-requests-remaining')
-            st.rerun()
 
     if st.session_state['api_data']:
         pend_list = df_attuale[df_attuale['Esito'] == "Pendente"]['Match'].tolist()
@@ -160,25 +140,25 @@ with t1:
                         st.divider()
             except: continue
 
-# --- TAB 2: PORTAFOGLIO (CON INFO RIEPILOGO) ---
+# --- TAB 2: PORTAFOGLIO ---
 with t2:
     df_p = df_attuale[df_attuale['Esito'] == "Pendente"]
     
-    # --- TESTATA RIEPILOGO ---
     if not df_p.empty:
         tot_impegnato = round(df_p['Stake'].sum(), 2)
         ritorno_potenziale = round((df_p['Stake'] * df_p['Quota']).sum(), 2)
         
+        # Testata con scritte bianche
         st.markdown(f"""
             <div style='background-color: #0e1117; padding: 15px; border-radius: 10px; border: 1px solid #30363d; margin-bottom: 20px;'>
                 <table style='width: 100%; border: none;'>
                     <tr>
                         <td style='text-align: center; border: none;'>
-                            <span style='color: gray; font-size: 0.9em;'>💰 TOTALE IMPEGNATO</span><br>
+                            <span style='color: white; font-size: 0.9em; font-weight: bold;'>TOTALE IMPEGNATO</span><br>
                             <span style='font-size: 1.5em; font-weight: bold; color: #ffc107;'>{tot_impegnato} €</span>
                         </td>
                         <td style='text-align: center; border: none; border-left: 1px solid #30363d;'>
-                            <span style='color: gray; font-size: 0.9em;'>🚀 RITORNO POTENZIALE</span><br>
+                            <span style='color: white; font-size: 0.9em; font-weight: bold;'>RITORNO POTENZIALE</span><br>
                             <span style='font-size: 1.5em; font-weight: bold; color: #00ff00;'>{ritorno_potenziale} €</span>
                         </td>
                     </tr>

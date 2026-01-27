@@ -69,13 +69,17 @@ def check_results():
 st.title("🎯 AI SNIPER V11.40")
 df_attuale = carica_db()
 
+# --- SIDEBAR ---
 with st.sidebar:
     st.header("📊 Stato API")
     c1, c2 = st.columns(2)
     c1.metric("Residui", st.session_state['api_usage']['remaining'])
     c2.metric("Usati", st.session_state['api_usage']['used'])
     st.divider()
-    budget_cassa = st.number_input("Budget (€)", value=250.0)
+    
+    # Aggiornato budget di default a 500.0
+    budget_cassa = st.number_input("Budget (€)", value=500.0)
+    
     rischio = st.slider("Kelly", 0.05, 0.50, 0.20)
     soglia_val = st.slider("Valore Min %", 0, 15, 5) / 100
 

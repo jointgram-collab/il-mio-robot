@@ -5,7 +5,7 @@ from datetime import datetime, date, timedelta
 from streamlit_gsheets import GSheetsConnection
 
 # --- CONFIGURAZIONE UI ---
-st.set_page_config(page_title="AI SNIPER V11.41 - Dual Mode", layout="wide")
+st.set_page_config(page_title="AI SNIPER V11.42 - Dual Mode Fix", layout="wide")
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 API_KEY = '01f1c8f2a314814b17de03eeb6c53623'
@@ -38,7 +38,7 @@ def salva_db(df):
     conn.update(worksheet="Giocate", data=df)
     st.cache_data.clear()
 
-# --- AUTO-CHECK RISULTATI (Aggiornato per Gol/NoGol) ---
+# --- AUTO-CHECK RISULTATI ---
 def check_results():
     df = carica_db()
     pendenti = df[df['Esito'] == "Pendente"]
@@ -55,14 +55,11 @@ def check_results():
                         s = m_res['scores']
                         s1, s2 = int(s[0]['score']), int(s[1]['score'])
                         score_str = f"{s1}-{s2}"
-                        
-                        # Logica Esito
                         vinto = False
                         if r['Scelta'] == "OVER 2.5": vinto = (s1 + s2) > 2.5
                         elif r['Scelta'] == "UNDER 2.5": vinto = (s1 + s2) < 2.5
                         elif r['Scelta'] == "GOL": vinto = s1 > 0 and s2 > 0
                         elif r['Scelta'] == "NO GOL": vinto = s1 == 0 or s2 == 0
-                        
                         df.at[i, 'Esito'] = "VINTO" if vinto else "PERSO"
                         df.at[i, 'Risultato'] = score_str
                         df.at[i, 'Profitto'] = round((r['Stake']*r['Quota'])-r['Stake'], 2) if vinto else -r['Stake']
@@ -70,7 +67,7 @@ def check_results():
     if cambiamenti: salva_db(df); st.rerun()
 
 # --- INTERFACCIA ---
-st.title("🎯 AI SNIPER V11.41 - Dual Mode")
+st.title("🎯 AI SNIPER V11.42")
 if 'api_data' not in st.session_state: st.session_state['api_data'] = []
 
 t1, t2, t3 = st.tabs(["🔍 SCANNER", "💼 PORTAFOGLIO", "📊 FISCALE"])
@@ -85,9 +82,9 @@ with t1:
         rischio = st.slider("Kelly", 0.05, 0.50, 0.20)
         soglia_val = st.slider("Valore Min %", 0, 15, 5) / 100
         st.divider()
-        st.markdown("### 📥 Backup")
+        st.markdown("### 📥 Backup & Upload")
         csv_data = df_tot.to_csv(index=False).encode('utf-8')
-        st.download_button("DOWNLOAD CSV", data=csv_data, file_name="backup.csv", mime='text/csv')
+        st.download_button("DOWNLOAD CSV", data=csv_data, file_name="backup.csv", mime='text/csv', use_container_width=True)
         uploaded = st.file_uploader("RIPRISTINA CSV", type="csv")
         if uploaded:
             if st.button("CONFERMA UPLOAD"):
@@ -95,15 +92,19 @@ with t1:
 
     leagues = {v: k for k, v in LEAGUE_NAMES.items()}
     c_camp, c_merc = st.columns(2)
-    sel_name = c_camp.selectbox("Campionato:", list(leagues.keys()))
-    sel_market = c_merc.selectbox("Mercato:", ["Over/Under 2.5", "Gol/No Gol"])
+    sel_name = c_camp.selectbox("Campionato:", list(leagues.keys()), on_change=lambda: st.session_state.update({"api_data": []}))
+    sel_market = c_merc.selectbox("Mercato:", ["Over/Under 2.5", "Gol/No Gol"], on_change=lambda: st.session_state.update({"api_data": []}))
     
-    # Mapping mercati API
     api_market = "totals" if sel_market == "Over/Under 2.5" else "btts"
 
-    if st.button("🚀 AVVIA SCANSIONE DUAL"):
-        res = requests.get(f'https://api.the-odds-api.com/v4/sports/{leagues[sel_name]}/odds/', params={'api_key': API_KEY, 'regions': 'eu', 'markets': api_market})
-        if res.status_code == 200: st.session_state['api_data'] = res.json()
+    if st.button("🚀 AVVIA SCANSIONE", use_container_width=True):
+        with st.spinner("Scansione in corso..."):
+            res = requests.get(f'https://api.the-odds-api.com/v4/sports/{leagues[sel_name]}/odds/', params={'api_key': API_KEY, 'regions': 'eu', 'markets': api_market})
+            if res.status_code == 200: 
+                st.session_state['api_data'] = res.json()
+                if not st.session_state['api_data']: st.warning("Nessun dato disponibile per questo mercato al momento.")
+            else:
+                st.error(f"Errore API: {res.status_code}")
 
     if st.session_state['api_data']:
         for m in st.session_state['api_data']:
@@ -115,14 +116,13 @@ with t1:
                     if b['title'] in BK_EURO_AUTH:
                         mk = next((x for x in b['markets'] if x['key'] == api_market), None)
                         if mk:
-                            # Logica dinamica per estrarre quote
                             if api_market == "totals":
                                 q_1 = next((o['price'] for o in mk['outcomes'] if o['name'] == 'Over' and o['point'] == 2.5), None)
                                 q_2 = next((o['price'] for o in mk['outcomes'] if o['name'] == 'Under' and o['point'] == 2.5), None)
                                 label_1, label_2 = "OVER 2.5", "UNDER 2.5"
-                            else: # btts
-                                q_1 = next((o['price'] for o in mk['outcomes'] if o['name'] == 'Yes'), None)
-                                q_2 = next((o['price'] for o in mk['outcomes'] if o['name'] == 'No'), None)
+                            else:
+                                q_1 = next((o['price'] for o in mk['outcomes'] if (o['name'] == 'Yes' or o['name'] == 'Both Teams To Score')), None)
+                                q_2 = next((o['price'] for o in mk['outcomes'] if (o['name'] == 'No' or o['name'] == 'Neither Team To Score')), None)
                                 label_1, label_2 = "GOL", "NO GOL"
                             
                             if q_1 and q_2:
@@ -148,7 +148,6 @@ with t1:
                         st.divider()
             except: continue
 
-# --- TAB 2 & 3: Rimasti identici alla tua versione 11.39/40 per stabilità ---
 with t2:
     st.subheader("💼 Portafoglio Pendente")
     df_p = carica_db()

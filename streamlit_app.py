@@ -4,51 +4,52 @@ import requests
 from datetime import datetime, date, timedelta
 from streamlit_gsheets import GSheetsConnection
 
-# --- 1. CONFIGURAZIONE ---
-st.set_page_config(page_title="AI SNIPER V11.49 - TOTAL REBUILD", layout="wide")
+# --- CONFIGURAZIONE UI ---
+st.set_page_config(page_title="AI SNIPER V11.39 - Full Empire", layout="wide")
 
+conn = st.connection("gsheets", type=GSheetsConnection)
 API_KEY = '01f1c8f2a314814b17de03eeb6c53623'
 TARGET_FINALE = 5000.0
 
-LEAGUE_MAP = {
-    "🇮🇹 Serie A": "soccer_italy_serie_a",
-    "🏴󠁧󠁢󠁥󠁮󠁧󠁿 Premier League": "soccer_epl",
-    "🇪🇸 La Liga": "soccer_spain_la_liga",
-    "🇩🇪 Bundesliga": "soccer_germany_bundesliga",
-    "🇫🇷 Ligue 1": "soccer_france_ligue_1",
-    "🇪🇺 Champions League": "soccer_uefa_champions_league"
+BK_EURO_AUTH = {
+    "Bet365": "https://www.bet365.it", "Snai": "https://www.snai.it",
+    "Better": "https://www.lottomatica.it/scommesse", "Planetwin365": "https://www.planetwin365.it",
+    "Eurobet": "https://www.eurobet.it", "Goldbet": "https://www.goldbet.it", 
+    "Sisal": "https://www.sisal.it", "Bwin": "https://www.bwin.it",
+    "William Hill": "https://www.williamhill.it", "888sport": "https://www.888sport.it"
 }
 
-BK_AUTH = ["Bet365", "Snai", "Better", "Planetwin365", "Eurobet", "Goldbet", "Sisal", "Bwin", "888sport"]
+LEAGUE_NAMES = {
+    "soccer_italy_serie_a": "🇮🇹 Serie A", "soccer_italy_serie_b": "🇮🇹 Serie B",
+    "soccer_england_league_1": "🏴󠁧󠁢󠁥󠁮󠁧󠁿 Premier League", "soccer_spain_la_liga": "🇪🇸 La Liga",
+    "soccer_germany_bundesliga": "🇩🇪 Bundesliga", "soccer_uefa_champions_league": "🇪🇺 Champions",
+    "soccer_uefa_europa_league": "🇪🇺 Europa League", "soccer_france_ligue_1": "🇫🇷 Ligue 1"
+}
 
-# --- 2. MOTORE DATABASE (CACHE ANTI-BLOCCO) ---
-conn = st.connection("gsheets", type=GSheetsConnection)
-
-@st.cache_data(ttl=20)
+# --- MOTORE DATABASE ---
 def carica_db():
     try:
         df = conn.read(worksheet="Giocate", ttl=0)
         if df is None or df.empty:
             return pd.DataFrame(columns=["Data Match", "Match", "Scelta", "Quota", "Stake", "Bookmaker", "Esito", "Profitto", "Sport_Key", "Risultato"])
+        df = df.dropna(subset=["Match"])
         df['dt_obj'] = pd.to_datetime(df['Data Match'] + f"/{date.today().year}", format="%d/%m %H:%M/%Y", errors='coerce')
-        return df.dropna(subset=["Match"])
-    except Exception as e:
-        st.error(f"Errore connessione Google Sheets: {e}")
+        return df
+    except:
         return pd.DataFrame(columns=["Data Match", "Match", "Scelta", "Quota", "Stake", "Bookmaker", "Esito", "Profitto", "Sport_Key", "Risultato"])
 
 def salva_db(df):
     if 'dt_obj' in df.columns: df = df.drop(columns=['dt_obj'])
     conn.update(worksheet="Giocate", data=df)
     st.cache_data.clear()
-    st.toast("✅ Cloud Sincronizzato!")
 
-# --- 3. AUTO-CHECK RISULTATI ---
+# --- AUTO-CHECK RISULTATI ---
 def check_results():
     df = carica_db()
     pendenti = df[df['Esito'] == "Pendente"]
     if pendenti.empty: return
     cambiamenti = False
-    with st.spinner("🔄 Recupero Score in corso..."):
+    with st.spinner("🔄 Verifica risultati..."):
         for skey in pendenti['Sport_Key'].unique():
             res = requests.get(f'https://api.the-odds-api.com/v4/sports/{skey}/scores/', params={'api_key': API_KEY, 'daysFrom': 3})
             if res.status_code == 200:
@@ -66,105 +67,126 @@ def check_results():
                         cambiamenti = True
     if cambiamenti: salva_db(df); st.rerun()
 
-# --- 4. INTERFACCIA PRINCIPALE ---
-st.title("🎯 AI SNIPER V11.49")
-df_tot = carica_db()
+# --- INTERFACCIA ---
+st.title("🎯 AI SNIPER V11.39")
+if 'api_data' not in st.session_state: st.session_state['api_data'] = []
 
 t1, t2, t3 = st.tabs(["🔍 SCANNER", "💼 PORTAFOGLIO", "📊 FISCALE"])
 
 # --- TAB 1: SCANNER ---
 with t1:
-    col_l, col_v = st.columns([1, 2])
-    sel_name = col_l.selectbox("Campionato:", list(LEAGUE_MAP.keys()))
-    soglia_v = col_v.slider("Soglia Valore %", -5, 15, 2) / 100 # Soglia estesa per debug
-    
-    if st.button("🚀 AVVIA SCANSIONE", use_container_width=True):
-        st.session_state['api_data'] = None
-        with st.status("📡 Connessione API...", expanded=True) as status:
-            try:
-                url = f'https://api.the-odds-api.com/v4/sports/{LEAGUE_MAP[sel_name]}/odds/'
-                params = {'api_key': API_KEY, 'regions': 'eu', 'markets': 'totals', 'oddsFormat': 'decimal'}
-                res = requests.get(url, params=params, timeout=15)
-                
-                if res.status_code == 200:
-                    st.session_state['api_data'] = res.json()
-                    rem = res.headers.get('x-requests-remaining', 'N/D')
-                    st.sidebar.metric("Crediti API", rem)
-                    status.update(label=f"✅ Ricevuti {len(st.session_state['api_data'])} Match", state="complete", expanded=False)
-                else:
-                    st.error(f"Errore API {res.status_code}")
-                    status.update(label="❌ Errore", state="error")
-            except Exception as e:
-                st.error(f"Errore: {e}")
-                status.update(label="❌ Fallito", state="error")
+    df_tot = carica_db()
+    match_pendenti = df_tot[df_tot['Esito'] == "Pendente"]['Match'].tolist() if not df_tot.empty else []
 
-    if 'api_data' in st.session_state and st.session_state['api_data']:
-        match_pendenti = df_tot[df_tot['Esito'] == "Pendente"]['Match'].tolist()
-        match_trovati = 0
-        
+    with st.sidebar:
+        st.header("⚙️ Parametri Cassa")
+        budget_cassa = st.number_input("Budget (€)", value=250.0)
+        rischio = st.slider("Kelly", 0.05, 0.50, 0.20)
+        soglia_val = st.slider("Valore Min %", 0, 15, 5) / 100
+        st.divider()
+        st.header("📈 Obiettivo Settimanale")
+        target_settimanale = st.number_input("Match Target", value=10)
+        today = date.today()
+        start_week = today - timedelta(days=today.weekday())
+        partite_sett = df_tot[df_tot['dt_obj'].dt.date >= start_week].shape[0] if not df_tot.empty else 0
+        st.progress(min(1.0, partite_sett / target_settimanale))
+        st.write(f"Giocate: **{partite_sett}** | Mancanti: **{max(0, target_settimanale - partite_sett)}**")
+
+    leagues = {v: k for k, v in LEAGUE_NAMES.items()}
+    sel_name = st.selectbox("Campionato:", list(leagues.keys()))
+    
+    if st.button("🚀 SCANSIONA"):
+        res = requests.get(f'https://api.the-odds-api.com/v4/sports/{leagues[sel_name]}/odds/', params={'api_key': API_KEY, 'regions': 'eu', 'markets': 'totals'})
+        if res.status_code == 200: st.session_state['api_data'] = res.json()
+
+    if st.session_state['api_data']:
         for m in st.session_state['api_data']:
             try:
-                nome_m = f"{m['home_team']}-{m['away_team']}"
+                nome_match = f"{m['home_team']}-{m['away_team']}"
+                gia_presente = nome_match in match_pendenti
                 date_m = datetime.strptime(m['commence_time'], "%Y-%m-%dT%H:%M:%SZ").strftime("%d/%m %H:%M")
-                
                 opts = []
                 for b in m.get('bookmakers', []):
-                    if b['title'] in BK_AUTH:
+                    if b['title'] in BK_EURO_AUTH:
                         mk = next((x for x in b['markets'] if x['key'] == 'totals'), None)
                         if mk:
-                            # Cerchiamo Over 2.5
-                            q_o = next((o['price'] for o in mk['outcomes'] if o['name'] == 'Over' and o['point'] == 2.5), 0)
-                            q_u = next((o['price'] for o in mk['outcomes'] if o['name'] == 'Under' and o['point'] == 2.5), 0)
-                            if q_o > 1 and q_u > 1:
-                                margin = (1/q_o) + (1/q_u)
-                                prob_o = ((1/q_o)/margin) + 0.05
-                                opts.append({"T": "OVER 2.5", "Q": q_o, "V": (prob_o * q_o) - 1, "BK": b['title']})
-                
+                            q_ov = next((o['price'] for o in mk['outcomes'] if o['name'] == 'Over' and o['point'] == 2.5), None)
+                            q_un = next((o['price'] for o in mk['outcomes'] if o['name'] == 'Under' and o['point'] == 2.5), None)
+                            if q_ov and q_un:
+                                margin = (1/q_ov) + (1/q_un)
+                                opts.append({"T": "OVER 2.5", "Q": q_ov, "P": ((1/q_ov)/margin)+0.06, "BK": b['title']})
+                                opts.append({"T": "UNDER 2.5", "Q": q_un, "P": ((1/q_un)/margin)+0.06, "BK": b['title']})
                 if opts:
-                    match_trovati += 1
-                    best = max(opts, key=lambda x: x['V'])
-                    c_info, c_add = st.columns([4, 1])
-                    
-                    if nome_m in match_pendenti:
-                        c_info.write(f"📅 {date_m} | {nome_m} | ✅ **IN PORTAFOGLIO**")
-                    else:
-                        is_valore = best['V'] >= soglia_v
-                        colore = "#00FF00" if is_valore else "#888888"
-                        c_info.markdown(f"📅 {date_m} | **{nome_m}** | <span style='color:{colore}'>Valore: {round(best['V']*100,1)}%</span> (BK: {best['BK']})", unsafe_allow_html=True)
-                        
-                        if is_valore:
-                            if c_add.button(f"ADD {best['Q']}", key=f"add_{nome_m}"):
-                                stake = round(max(2.0, min(250 * (best['V']/(best['Q']-1)) * 0.15, 30.0)), 2)
-                                n = {"Data Match": date_m, "Match": nome_m, "Scelta": best['T'], "Quota": best['Q'], "Stake": stake, "Bookmaker": best['BK'], "Esito": "Pendente", "Profitto": 0.0, "Sport_Key": LEAGUE_MAP[sel_name], "Risultato": "-"}
+                    best = max(opts, key=lambda x: (x['P'] * x['Q']) - 1)
+                    val = round(((best['P'] * best['Q']) - 1) * 100, 2)
+                    if val/100 > soglia_val:
+                        col_txt, col_btn = st.columns([3, 1])
+                        if gia_presente:
+                            col_txt.write(f"📅 {date_m} | {sel_name} | **{nome_match}** \n✅ **GIÀ IN PORTAFOGLIO**")
+                            col_btn.button("OK", key=f"btn_{nome_match}", disabled=True)
+                        else:
+                            col_txt.write(f"📅 {date_m} | {sel_name} | **{nome_match}**")
+                            if col_btn.button(f"ADD {best['T']} @{best['Q']} (+{val}%)", key=f"add_{nome_match}"):
+                                val_k = (best['P'] * best['Q']) - 1
+                                stake = round(max(2.0, min(budget_cassa * (val_k/(best['Q']-1)) * rischio, budget_cassa*0.15)), 2)
+                                n = {"Data Match": date_m, "Match": nome_match, "Scelta": best['T'], "Quota": best['Q'], "Stake": stake, "Bookmaker": best['BK'], "Esito": "Pendente", "Profitto": 0.0, "Sport_Key": leagues[sel_name], "Risultato": "-"}
                                 salva_db(pd.concat([carica_db(), pd.DataFrame([n])], ignore_index=True))
                                 st.rerun()
-                    st.divider()
+                        st.divider()
             except: continue
-        
-        if match_trovati == 0:
-            st.warning("I match sono stati ricevuti, ma nessuno ha quote Over/Under 2.5 disponibili nei bookmaker autorizzati.")
 
 # --- TAB 2: PORTAFOGLIO ---
 with t2:
-    st.subheader("💼 Portafoglio")
-    pend = df_tot[df_tot['Esito'] == "Pendente"]
-    if not pend.empty:
-        st.button("🔄 AGGIORNA RISULTATI", on_click=check_results, use_container_width=True)
-        for i, r in pend.iterrows():
-            cm, cb = st.columns([10, 1])
-            cm.markdown(f"🗓️ {r['Data Match']} | **{r['Match']}** | <span style='font-size:1.1rem;'>**{r['Scelta']} @{r['Quota']}**</span> | 💰 {r['Stake']}€ | 🏦 {r['Bookmaker']}", unsafe_allow_html=True)
-            if cb.button("🗑️", key=f"del_{i}"):
-                salva_db(df_tot.drop(i)); st.rerun()
-            st.divider()
-    else: st.info("Nessuna giocata attiva.")
+    st.subheader("💼 Portafoglio Pendente")
+    df_p = carica_db()
+    pend = df_p[df_p['Esito'] == "Pendente"]
+    
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Esposto", f"{round(pend['Stake'].sum(), 2)} €")
+    c2.metric("Rientro Lordo", f"{round((pend['Stake'] * pend['Quota']).sum(), 2)} €")
+    c3.metric("Possibile Vincita", f"{round((pend['Stake'] * pend['Quota']).sum() - pend['Stake'].sum(), 2)} €")
+    
+    st.button("🔄 AGGIORNA RISULTATI", on_click=check_results, use_container_width=True)
+    st.divider()
+    
+    for i, r in pend.iterrows():
+        col_main, col_btn = st.columns([10, 1])
+        camp = LEAGUE_NAMES.get(r['Sport_Key'], "Vari")
+        vincita_r = round(r['Stake'] * r['Quota'], 2)
+        riga = f"🗓️ {r['Data Match']} | {camp} | **{r['Match']}** | <span style='font-size:1.2rem;'>**{r['Scelta']} @{r['Quota']}**</span> | 💰 {r['Stake']}€ | 💸 **{vincita_r}€** | 🏦 {r['Bookmaker']}"
+        col_main.markdown(riga, unsafe_allow_html=True)
+        if col_btn.button("🗑️", key=f"del_{i}"):
+            salva_db(df_p.drop(i)); st.rerun()
+        st.divider()
 
 # --- TAB 3: FISCALE ---
 with t3:
     st.subheader("📊 Analisi Fiscale")
-    if not df_tot.empty:
-        netto = round(df_tot['Profitto'].sum(), 2)
-        mancante = round(TARGET_FINALE - netto, 2)
-        st.info(f"🏆 Goal: {TARGET_FINALE}€ | Attuale: {netto}€ | Mancano: {mancante}€")
-        st.progress(min(1.0, max(0.0, netto / TARGET_FINALE)))
+    df_f = carica_db()
+    if not df_f.empty:
+        # Calcoli Goal Tracker
+        tot_scommesso = round(df_f['Stake'].sum(), 2)
+        tot_vinto_lordo = round(df_f[df_f['Esito'] == "VINTO"]['Profitto'].sum() + df_f[df_f['Esito'] == "VINTO"]['Stake'].sum(), 2)
+        profitto_netto = round(tot_vinto_lordo - tot_scommesso, 2)
+        mancante = round(TARGET_FINALE - profitto_netto, 2)
         
-        st.dataframe(df_tot[["Data Match", "Match", "Scelta", "Quota", "Esito", "Profitto", "Risultato"]].sort_index(ascending=False), use_container_width=True)
+        st.info(f"🏆 **Goal: {TARGET_FINALE}€** | Attuale: **{profitto_netto}€** | Mancano: **{mancante}€**")
+        st.progress(min(1.0, max(0.0, profitto_netto / TARGET_FINALE)))
+        
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Totale Speso", f"{tot_scommesso} €")
+        m2.metric("Totale Vinto", f"{tot_vinto_lordo} €")
+        m3.metric("Profitto Netto", f"{profitto_netto} €", delta=f"{profitto_netto}€")
+        st.divider()
+
+        df_valid = df_f.dropna(subset=['dt_obj'])
+        s_range = st.date_input("Filtra Periodo:", [df_valid['dt_obj'].min().date() if not df_valid.empty else date.today(), date.today()])
+        if len(s_range) == 2:
+            df_fil = df_f[(df_f['dt_obj'].dt.date >= s_range[0]) & (df_f['dt_obj'].dt.date <= s_range[1])].sort_index(ascending=False)
+            for i, row in df_fil.iterrows():
+                camp = LEAGUE_NAMES.get(row['Sport_Key'], "Vari")
+                v_pot = round(row['Stake'] * row['Quota'], 2)
+                dati = f"{row['Data Match']} | {camp} | **{row['Match']}** | **{row['Scelta']} @{row['Quota']}**"
+                if row['Esito'] == "VINTO": st.success(f"🟢 VINTO | {dati} | Score: {row['Risultato']} | +{row['Profitto']}€")
+                elif row['Esito'] == "PERSO": st.error(f"🔴 PERSO | {dati} | Score: {row['Risultato']} | {row['Profitto']}€")
+                else: st.warning(f"🟡 PENDENTE | {dati} | 💰 Possibile Vincita: **{v_pot}€**")

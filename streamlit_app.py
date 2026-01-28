@@ -1,4 +1,4 @@
-import st
+import streamlit as st # <--- FIX: Corretto da 'import st' a 'import streamlit as st'
 import pandas as pd
 import requests
 import time
@@ -6,11 +6,12 @@ from datetime import datetime, timedelta, date
 from streamlit_gsheets import GSheetsConnection
 
 # --- CONFIGURAZIONE UI ---
-st.set_page_config(page_title="AI SNIPER V13.4 - Fixed Scanner", layout="wide")
+st.set_page_config(page_title="AI SNIPER V13.5 - Bug Fix", layout="wide")
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 API_KEY = '01f1c8f2a314814b17de03eeb6c53623'
 
+# ... resto del codice identico alla versione precedente ...
 if 'api_usage' not in st.session_state:
     st.session_state['api_usage'] = {'remaining': "N/D", 'used': "N/D"}
 if 'api_data' not in st.session_state:

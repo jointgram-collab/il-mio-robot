@@ -1,4 +1,4 @@
-import streamlit as st
+import st
 import pandas as pd
 import requests
 import time
@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, date
 from streamlit_gsheets import GSheetsConnection
 
 # --- CONFIGURAZIONE UI ---
-st.set_page_config(page_title="AI SNIPER V13.3", layout="wide")
+st.set_page_config(page_title="AI SNIPER V13.4 - Fixed Scanner", layout="wide")
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 API_KEY = '01f1c8f2a314814b17de03eeb6c53623'
@@ -42,6 +42,15 @@ def salva_db(df):
     conn.update(worksheet="Giocate", data=df)
     st.cache_data.clear()
 
+def get_champions_key():
+    try:
+        r = requests.get(f'https://api.the-odds-api.com/v4/sports/?api_key={API_KEY}')
+        if r.status_code == 200:
+            for s in r.json():
+                if "Champions League" in s.get('title', ''): return s.get('key')
+        return "soccer_uefa_champions_league"
+    except: return "soccer_uefa_champions_league"
+
 def check_results():
     df = carica_db()
     pendenti = df[df['Esito'] == "Pendente"]
@@ -70,7 +79,7 @@ def check_results():
         st.rerun()
 
 # --- INTERFACCIA ---
-st.title("🎯 AI SNIPER V13.3")
+st.title("🎯 AI SNIPER V13.4")
 df_attuale = carica_db()
 
 with st.sidebar:
@@ -85,19 +94,20 @@ with st.sidebar:
 
 t1, t2, t3 = st.tabs(["🔍 SCANNER", "💼 PORTAFOGLIO", "📊 FISCALE"])
 
-# --- TAB 1: SCANNER ---
+# --- TAB 1: SCANNER (RIPRISTINATA SCANSIONE SINGOLA) ---
 with t1:
     leagues = {v: k for k, v in LEAGUE_NAMES.items()}
-    c_sel, c_all, c_ore = st.columns([2, 1, 1])
-    sel_name = c_sel.selectbox("Campionato Singolo:", list(leagues.keys()))
-    ore_limite = c_ore.selectbox("Finestra Ore:", [24, 48, 72, 96, 120, 168], index=2) 
+    c_sel, c_all, c_sing, c_ore = st.columns([1.5, 1, 1, 1])
     
-    if c_all.button("🚀 SCANSIONE TOTALE", use_container_width=True):
+    sel_name = c_sel.selectbox("Campionato Singolo:", list(leagues.keys()))
+    ore_limite = c_ore.selectbox("Finestra Ore:", [24, 48, 72, 96, 120, 168], index=2)
+    
+    # PULSANTE SCANSIONE TOTALE
+    if c_all.button("🚀 TOTALE", use_container_width=True):
         all_found = []
         keys_to_scan = list(LEAGUE_NAMES.keys())
         pbar = st.progress(0)
         limit_date = datetime.utcnow() + timedelta(hours=ore_limite)
-        
         for idx, k in enumerate(set(keys_to_scan)):
             r = requests.get(f'https://api.the-odds-api.com/v4/sports/{k}/odds/', params={'api_key': API_KEY, 'regions': 'eu', 'markets': 'totals'})
             if r.status_code == 200:
@@ -109,6 +119,17 @@ with t1:
             pbar.progress((idx + 1) / len(set(keys_to_scan)))
         st.session_state['api_data'] = all_found
         st.rerun()
+
+    # PULSANTE SCANSIONE SINGOLA (CORRETTO)
+    if c_sing.button("🔍 SINGOLA", use_container_width=True):
+        target_key = get_champions_key() if "Champions" in sel_name else leagues[sel_name]
+        res = requests.get(f'https://api.the-odds-api.com/v4/sports/{target_key}/odds/', params={'api_key': API_KEY, 'regions': 'eu', 'markets': 'totals'})
+        if res.status_code == 200:
+            data = res.json()
+            limit_date = datetime.utcnow() + timedelta(hours=ore_limite)
+            st.session_state['api_data'] = [m for m in data if datetime.strptime(m['commence_time'], "%Y-%m-%dT%H:%M:%SZ") <= limit_date]
+            st.session_state['api_usage']['remaining'] = res.headers.get('x-requests-remaining')
+            st.rerun()
 
     if st.session_state['api_data']:
         pend_list = df_attuale[df_attuale['Esito'] == "Pendente"]['Match'].tolist()
@@ -143,12 +164,9 @@ with t1:
 # --- TAB 2: PORTAFOGLIO ---
 with t2:
     df_p = df_attuale[df_attuale['Esito'] == "Pendente"]
-    
     if not df_p.empty:
         tot_impegnato = round(df_p['Stake'].sum(), 2)
         ritorno_potenziale = round((df_p['Stake'] * df_p['Quota']).sum(), 2)
-        
-        # Testata con scritte bianche
         st.markdown(f"""
             <div style='background-color: #0e1117; padding: 15px; border-radius: 10px; border: 1px solid #30363d; margin-bottom: 20px;'>
                 <table style='width: 100%; border: none;'>
@@ -165,10 +183,8 @@ with t2:
                 </table>
             </div>
             """, unsafe_allow_html=True)
-    
     st.button("🔄 AGGIORNA RISULTATI", on_click=check_results, use_container_width=True)
     st.markdown("<br>", unsafe_allow_html=True)
-    
     if not df_p.empty:
         for i, r in df_p.iterrows():
             vinc_p = round(r['Stake'] * r['Quota'], 2)
@@ -182,8 +198,7 @@ with t2:
             if c2.button("🗑️", key=f"del_{i}"):
                 salva_db(df_attuale.drop(i))
                 st.rerun()
-    else: 
-        st.info("Nessuna giocata pendente.")
+    else: st.info("Nessuna giocata pendente.")
 
 # --- TAB 3: FISCALE ---
 with t3:

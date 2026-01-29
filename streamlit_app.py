@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, date
 from streamlit_gsheets import GSheetsConnection
 
 # --- CONFIGURAZIONE UI & CSS ---
-st.set_page_config(page_title="AI SNIPER V13.8 - FULL DESIGN", layout="wide")
+st.set_page_config(page_title="AI SNIPER V13.9 - ICON EDITION", layout="wide")
 
 st.markdown("""
     <style>
@@ -35,23 +35,31 @@ st.markdown("""
         text-align: center;
         font-weight: bold;
     }
-    .bg-blue { background-color: rgba(33, 150, 243, 0.2); border: 1px solid #2196f3; }
-    .bg-green { background-color: rgba(76, 175, 80, 0.2); border: 1px solid #4caf50; }
-    .bg-red { background-color: rgba(244, 67, 54, 0.2); border: 1px solid #f44336; }
-    .bg-orange { background-color: rgba(255, 152, 0, 0.2); border: 1px solid #ff9800; }
+    .bg-blue { background-color: rgba(33, 150, 243, 0.15); border: 1px solid #2196f3; }
+    .bg-green { background-color: rgba(76, 175, 80, 0.15); border: 1px solid #4caf50; }
+    .bg-red { background-color: rgba(244, 67, 54, 0.15); border: 1px solid #f44336; }
+    .bg-orange { background-color: rgba(255, 152, 0, 0.15); border: 1px solid #ff9800; }
     
     /* Box Riepilogo Portafoglio */
     .summary-box {
-        background-color: #161b22;
-        padding: 20px;
-        border-radius: 12px;
-        border: 2px solid #30363d;
+        background-color: #1c2128;
+        padding: 25px;
+        border-radius: 15px;
+        border: 1px solid #444c56;
         text-align: center;
         margin-bottom: 25px;
     }
     
-    .main-header { font-size: 28px; font-weight: 800; letter-spacing: -1px; margin-bottom: 25px; }
-    section[data-testid="stSidebar"] { background-color: #0d1117; }
+    .main-header { font-size: 32px; font-weight: 800; letter-spacing: -1.5px; margin-bottom: 25px; color: #adbac7; }
+    section[data-testid="stSidebar"] { background-color: #0d1117; border-right: 1px solid #30363d; }
+    
+    /* Pulsanti personalizzati */
+    .stButton>button {
+        border-radius: 6px;
+        text-transform: uppercase;
+        font-size: 12px;
+        letter-spacing: 0.5px;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -93,10 +101,10 @@ def check_results():
     df = carica_db()
     pendenti = df[df['Esito'] == "Pendente"]
     if pendenti.empty:
-        st.info("Nessuna scommessa pendente.")
+        st.info("Nessuna scommessa pendente da verificare.")
         return
     cambiamenti = False
-    with st.spinner("🔄 Verifica risultati..."):
+    with st.spinner("🔄 Interrogazione risultati API..."):
         for skey in pendenti['Sport_Key'].unique():
             res = requests.get(f'https://api.the-odds-api.com/v4/sports/{skey}/scores/', params={'api_key': API_KEY, 'daysFrom': 3})
             if res.status_code == 200:
@@ -114,33 +122,35 @@ def check_results():
                             cambiamenti = True
     if cambiamenti:
         salva_db(df)
+        st.success("Risultati aggiornati con successo!")
         st.rerun()
 
 # --- INTERFACCIA ---
-st.markdown('<div class="main-header">🎯 AI SNIPER <span style="font-size:14px; color:#58a6ff;">V13.8 DESIGN</span></div>', unsafe_allow_html=True)
+st.markdown('<div class="main-header">🎯 AI SNIPER <span style="font-size:14px; color:#58a6ff;">V13.9 STABILE</span></div>', unsafe_allow_html=True)
 df_attuale = carica_db()
 
 with st.sidebar:
-    st.markdown("### 📊 API Status")
+    st.markdown("### 📡 Collegamento API")
     c1, c2 = st.columns(2)
     c1.metric("Residui", st.session_state['api_usage']['remaining'])
     c2.metric("Usati", st.session_state['api_usage']['used'])
     st.divider()
+    st.markdown("### ⚙️ Parametri Strategia")
     budget_cassa = st.number_input("Budget (€)", value=500.0)
-    rischio = st.slider("Kelly %", 0.05, 0.50, 0.20)
-    soglia_val = st.slider("Valore Min %", 0, 15, 3) / 100
+    rischio = st.slider("Kelly Criterion %", 0.05, 0.50, 0.20)
+    soglia_val = st.slider("Valore Minimo %", 0, 15, 3) / 100
 
-t1, t2, t3 = st.tabs(["🔍 SCANNER", "💼 PORTAFOGLIO", "📊 FISCALE"])
+t1, t2, t3 = st.tabs(["🔍 SCANNER ATTIVO", "💼 PORTAFOGLIO PENDENTI", "📊 REPORT FISCALE"])
 
 # --- TAB 1: SCANNER ---
 with t1:
     leagues = {v: k for k, v in LEAGUE_NAMES.items()}
-    c_sel, c_btns, c_ore = st.columns([1.5, 1, 1])
-    sel_name = c_sel.selectbox("Campionato Singolo:", list(leagues.keys()))
-    ore_limite = c_ore.selectbox("Finestra Ore:", [24, 48, 72, 96, 120], index=2)
+    c_sel, c_btns, c_ore = st.columns([1.5, 1.2, 0.8])
+    sel_name = c_sel.selectbox("Seleziona Campionato:", list(leagues.keys()))
+    ore_limite = c_ore.selectbox("Timeframe (H):", [24, 48, 72, 96, 120, 168], index=2)
     
     col_t, col_s = c_btns.columns(2)
-    if col_t.button("🚀 TOTALE", use_container_width=True):
+    if col_t.button("🚀 SCAN TOTALE", use_container_width=True):
         all_found = []
         keys_to_scan = list(LEAGUE_NAMES.keys())
         pbar = st.progress(0)
@@ -157,7 +167,7 @@ with t1:
         st.session_state['api_data'] = all_found
         st.rerun()
 
-    if col_s.button("🔍 SINGOLA", use_container_width=True):
+    if col_s.button("🔍 SCAN SINGOLO", use_container_width=True):
         res = requests.get(f'https://api.the-odds-api.com/v4/sports/{leagues[sel_name]}/odds/', params={'api_key': API_KEY, 'regions': 'eu', 'markets': 'totals'})
         if res.status_code == 200:
             st.session_state['api_data'] = res.json()
@@ -187,17 +197,21 @@ with t1:
                         stk_c = round(max(2.0, min(budget_cassa * (val/(best['Q']-1)) * rischio, budget_cassa*0.15)), 2)
                         st.markdown(f"""
                             <div class="match-card">
-                                <div style="display: flex; justify-content: space-between;">
-                                    <span>📅 {dt_m} | <b>{nome_m}</b></span>
-                                    <span style="color: #8b949e;">{m['sport_title']}</span>
+                                <div style="display: flex; justify-content: space-between; align-items: center;">
+                                    <span style="font-size: 1.1em; font-weight: 600;">⚽ {nome_m}</span>
+                                    <span style="color: #8b949e; font-size: 0.85em;">📅 {dt_m}</span>
                                 </div>
-                                <div style="margin-top: 10px; color: #58a6ff; font-size: 18px;">Giocata: <b>{best['T']}</b> @{best['Q']}</div>
-                                <div style="font-size: 13px; color: #8b949e;">Stake: <span style="color: #ffc107;">{stk_c}€</span> | Valore: <span style="color: #39d353;">{round(val*100,1)}%</span> | 🏦 {best['BK']}</div>
+                                <div style="margin: 12px 0; color: #58a6ff; font-size: 20px; font-weight: 700;">{best['T']} @ {best['Q']}</div>
+                                <div style="font-size: 13px; color: #8b949e; display: flex; justify-content: space-between;">
+                                    <span>💰 Stake: <b style="color: #ffc107;">{stk_c}€</b></span>
+                                    <span>🔥 Value: <b style="color: #39d353;">+{round(val*100,1)}%</b></span>
+                                    <span>🏛️ {best['BK']}</span>
+                                </div>
                             </div>
                         """, unsafe_allow_html=True)
                         if nome_m in pend_list:
-                            st.button("✅ IN PORTAFOGLIO", key=f"btn_{i}", disabled=True, use_container_width=True)
-                        elif st.button(f"AGGIUNGI {nome_m}", key=f"btn_{i}", use_container_width=True):
+                            st.button(f"✅ GESTITO: {nome_m}", key=f"btn_{i}", disabled=True, use_container_width=True)
+                        elif st.button(f"➕ AGGIUNGI AL PORTAFOGLIO", key=f"btn_{i}", use_container_width=True):
                             nuova = pd.DataFrame([{"Data Match": dt_m, "Match": nome_m, "Scelta": best['T'], "Quota": best['Q'], "Stake": stk_c, "Bookmaker": best['BK'], "Esito": "Pendente", "Profitto": 0.0, "Sport_Key": m['sport_key'], "Risultato": "-"}])
                             salva_db(pd.concat([carica_db(), nuova], ignore_index=True))
                             st.rerun()
@@ -209,17 +223,23 @@ with t2:
     if not df_p.empty:
         tot_impegnato = round(df_p['Stake'].sum(), 2)
         ritorno_potenziale = round((df_p['Stake'] * df_p['Quota']).sum(), 2)
-        st.markdown(f"""<div class="summary-box"><div style="display: flex; justify-content: space-around;">
-            <div><div style="color: white; font-size: 14px; opacity: 0.8;">TOTALE IMPEGNATO</div><div style="color: #ffc107; font-size: 32px; font-weight: bold;">{tot_impegnato} €</div></div>
-            <div><div style="color: white; font-size: 14px; opacity: 0.8;">RITORNO POTENZIALE</div><div style="color: #39d353; font-size: 32px; font-weight: bold;">{ritorno_potenziale} €</div></div>
-        </div></div>""", unsafe_allow_html=True)
-        st.button("🔄 AGGIORNA RISULTATI", on_click=check_results, key="upd_res", use_container_width=True)
+        st.markdown(f"""<div class="summary-box">
+            <div style="display: flex; justify-content: space-around;">
+                <div><div style="color: #adbac7; font-size: 14px;">CAPITALE IMPEGNATO</div><div style="color: #ffc107; font-size: 36px; font-weight: 800;">{tot_impegnato} €</div></div>
+                <div><div style="color: #adbac7; font-size: 14px;">RITORNO ATTESO</div><div style="color: #39d353; font-size: 36px; font-weight: 800;">{ritorno_potenziale} €</div></div>
+            </div>
+        </div>""", unsafe_allow_html=True)
+        st.button("🔄 AGGIORNA ESITI MATCH", on_click=check_results, key="upd_res_final", use_container_width=True)
+        st.markdown("<br>", unsafe_allow_html=True)
         for i, r in df_p.iterrows():
-            st.markdown(f"<div class='match-card'><b>{r['Match']}</b> | {r['Scelta']} @{r['Quota']} | Stake: {r['Stake']}€</div>", unsafe_allow_html=True)
-            if st.button(f"Rimuovi {r['Match']}", key=f"del_{i}"):
+            c_card, c_del = st.columns([6, 1])
+            c_card.markdown(f"""<div class="match-card" style="border-left: 4px solid #ffc107;">
+                <b>{r['Match']}</b><br><span style="color:#58a6ff;">{r['Scelta']} @{r['Quota']}</span> | Stake: {r['Stake']}€ | 🏛️ {r['Bookmaker']}
+            </div>""", unsafe_allow_html=True)
+            if c_del.button("🗑️", key=f"del_{i}", help="Rimuovi scommessa"):
                 salva_db(df_attuale.drop(i))
                 st.rerun()
-    else: st.info("Nessuna giocata pendente.")
+    else: st.info("Nessuna posizione aperta al momento.")
 
 # --- TAB 3: FISCALE ---
 with t3:
@@ -229,9 +249,16 @@ with t3:
         tot_perso = round(df_attuale[df_attuale['Esito'] == "PERSO"]['Stake'].sum(), 2)
         prof_netto = round(df_attuale['Profitto'].sum(), 2)
         st.markdown(f"""<div class="metric-container">
-            <div class="metric-box bg-blue">💰 GIOCATO<br><span style="font-size:20px;">{tot_giocato}€</span></div>
-            <div class="metric-box bg-green">✅ VINTO<br><span style="font-size:20px;">{tot_vinto}€</span></div>
-            <div class="metric-box bg-red">❌ PERSO<br><span style="font-size:20px;">{tot_perso}€</span></div>
-            <div class="metric-box bg-orange">📈 NETTO<br><span style="font-size:20px;">{prof_netto}€</span></div>
+            <div class="metric-box bg-blue">💰 GIOCATO<br><span style="font-size:22px;">{tot_giocato}€</span></div>
+            <div class="metric-box bg-green">✅ VINTO<br><span style="font-size:22px;">{tot_vinto}€</span></div>
+            <div class="metric-box bg-red">❌ PERSO<br><span style="font-size:22px;">{tot_perso}€</span></div>
+            <div class="metric-box bg-orange">📈 NETTO<br><span style="font-size:22px;">{prof_netto}€</span></div>
         </div>""", unsafe_allow_html=True)
-        st.dataframe(df_attuale[["Data Match", "Match", "Scelta", "Quota", "Stake", "Esito", "Profitto"]].sort_index(ascending=False), use_container_width=True)
+        
+        # Colorazione righe tabella
+        def color_rows(val):
+            if val == "VINTO": return 'color: #39d353; font-weight: bold'
+            if val == "PERSO": return 'color: #f85149; font-weight: bold'
+            return 'color: #e3b341'
+
+        st.dataframe(df_attuale[["Data Match", "Match", "Scelta", "Quota", "Stake", "Esito", "Profitto", "Risultato"]].sort_index(ascending=False).style.applymap(color_rows, subset=['Esito']), use_container_width=True)

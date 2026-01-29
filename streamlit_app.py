@@ -3,18 +3,18 @@ import streamlit as st
 # --- CONFIGURAZIONE PAGINA ---
 st.set_page_config(page_title="AI SNIPER V14.2", layout="wide")
 
-# --- CSS STEP 1: SIDEBAR & SLIDERS ---
+# --- CSS STEP 1: SIDEBAR HIGH-CONTRAST ---
 st.markdown("""
     <style>
-    /* 1. Sfondo Sidebar */
+    /* Sfondo Sidebar Scuro Profondo */
     [data-testid="stSidebar"] {
-        background-color: #1a1d26;
-        border-right: 1px solid #2d313d;
+        background-color: #11141a;
+        border-right: 1px solid #30363d;
     }
 
-    /* 2. Titoli e Testi Sidebar */
+    /* Testi e Titoli: Bianco Puro e Grigio Chiaro */
     .sb-title {
-        color: #ffffff;
+        color: #ffffff !important; /* Bianco puro per i titoli */
         font-size: 18px;
         font-weight: 700;
         margin-bottom: 20px;
@@ -23,72 +23,90 @@ st.markdown("""
         gap: 10px;
     }
     
-    /* 3. Styling degli Slider (Verde e Bianco) */
-    div[data-testid="stSlider"] > div [data-baseweb="slider"] > div:first-child {
-        background: linear-gradient(to right, #39d353 0%, #39d353 var(--progress), #30363d var(--progress), #30363d 100%);
+    .label-text {
+        color: #8b949e; /* Grigio chiaro leggibile per le etichette */
+        font-size: 14px;
+        font-weight: 500;
     }
-    div[data-testid="stSlider"] [data-baseweb="slider"] [aria-valuenow] {
-        background-color: #ffffff;
-        border: 2px solid #39d353;
-        box-shadow: 0 0 10px rgba(57, 211, 83, 0.4);
+
+    .value-text {
+        color: #ffffff; /* Bianco per i numeri e i valori */
+        font-weight: 700;
+    }
+
+    /* Styling degli Slider (Verde Neon e Bianco) */
+    div[data-testid="stSlider"] [data-baseweb="slider"] {
+        margin-top: 10px;
     }
     
-    /* Colore dei numeri sopra lo slider */
-    div[data-testid="stWidgetLabel"] p {
-        color: #e1e1e1;
-        font-weight: 600;
+    /* Il cerchietto dello slider deve essere Bianco */
+    div[data-testid="stSlider"] [data-baseweb="slider"] [aria-valuenow] {
+        background-color: #ffffff !important;
+        border: 2px solid #39d353 !important;
     }
 
-    /* 4. API Metric Box */
+    /* API Metric Box */
     .api-container {
-        background-color: #11141a;
+        background-color: #1c2128;
         padding: 15px;
         border-radius: 8px;
-        border: 1px solid #30363d;
+        border: 1px solid #444c56;
         margin-bottom: 20px;
     }
-    .api-row { display: flex; justify-content: space-between; font-size: 14px; margin-bottom: 5px; }
-    .api-val { font-weight: 700; color: #ffffff; }
-    .api-bar-bg { background: #30363d; height: 6px; border-radius: 3px; overflow: hidden; }
-    .api-bar-fill { background: #39d353; height: 100%; border-radius: 3px; }
+    
+    .api-row { display: flex; justify-content: space-between; margin-bottom: 5px; }
+    
+    /* Barra di progresso verde */
+    .api-bar-bg { background: #30363d; height: 8px; border-radius: 4px; overflow: hidden; margin-top: 10px; }
+    .api-bar-fill { background: #39d353; height: 100%; border-radius: 4px; box-shadow: 0 0 8px #39d353; }
 
+    /* Fix per le scritte standard di Streamlit in Sidebar */
+    [data-testid="stWidgetLabel"] p {
+        color: #ffffff !important; /* Forza i nomi degli slider in bianco */
+        font-size: 15px !important;
+    }
     </style>
 """, unsafe_allow_html=True)
 
 # --- SIDEBAR CONTENT ---
 with st.sidebar:
-    # Header API Status
-    st.markdown('<div class="sb-title">📶 API Status</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sb-title">🔥 API Status</div>', unsafe_allow_html=True)
     
-    # Box API come da immagine
+    # Dati API
     residui = 440
     usati = 60
     percentuale = (usati / (residui + usati)) * 100
     
     st.markdown(f"""
         <div class="api-container">
-            <div class="api-row"><span>Residui: {residui}</span><span class="api-val">{residui}</span></div>
-            <div class="api-row"><span>Usati</span><span class="api-val">Fiinett: {usati}</span></div>
-            <div style="margin-top:10px; margin-bottom:5px; font-weight:700;">Usati <span style="float:right;">{usati}</span></div>
+            <div class="api-row">
+                <span class="label-text">Residui:</span>
+                <span class="value-text">{residui}</span>
+            </div>
+            <div class="api-row">
+                <span class="label-text">Usati:</span>
+                <span class="value-text">{usati}</span>
+            </div>
+            <div style="margin-top:15px; display:flex; justify-content:space-between;">
+                <span class="label-text">Utilizzo</span>
+                <span style="color:#39d353; font-weight:bold;">{int(percentuale)}%</span>
+            </div>
             <div class="api-bar-bg"><div class="api-bar-fill" style="width: {percentuale}%;"></div></div>
         </div>
     """, unsafe_allow_html=True)
     
     st.markdown("---")
     
-    # Header Strategia
-    st.markdown('<div class="sb-title">📊 Parametri Strategia</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sb-title">📊 Parametri</div>', unsafe_allow_html=True)
     
-    # Gli slider ora prendono il CSS sopra per diventare verdi e bianchi
-    budget = st.slider("Budget (€)", 0, 1000, 440)
-    kelly = st.slider("Kelly", 0, 100, 50)
-    kelly2 = st.slider("Kelly ", 0, 100, 73) # Secondo slider come nell'immagine
-    valore_min = st.slider("Valore Min %", 0, 100, 14)
+    # Slider con contrasto migliorato
+    st.slider("Budget (€)", 0, 1000, 500)
+    st.slider("Kelly Criterion", 0.05, 0.50, 0.20)
+    st.slider("Valore Minimo %", 0, 100, 14)
 
     st.markdown("---")
-    
-    # Sezione Impostazioni
     st.markdown('<div class="sb-title">⚙️ Impostazioni</div>', unsafe_allow_html=True)
 
-# --- CORPO CENTRALE (VUOTO PER ORA) ---
-st.write("Configurazione Sidebar completata. Controlla se i colori e gli slider corrispondono a quelli della tua immagine.")
+# --- CORPO CENTRALE ---
+st.title("Test Leggibilità Sidebar")
+st.write("Verifica se ora i testi bianchi sulla sidebar scura sono ben visibili.")

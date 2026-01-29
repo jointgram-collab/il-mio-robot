@@ -1,114 +1,98 @@
 import streamlit as st
 
-# --- CONFIGURAZIONE CSS STEP 2 (Aggiungere al CSS precedente) ---
+# --- AGGIORNAMENTO CSS STEP 2: COMPACT CARDS ---
 st.markdown("""
     <style>
-    /* 1. Sfondo Area Centrale */
-    .stApp { background-color: #0b0e14; }
+    /* Contenitore per limitare la larghezza delle card al centro */
+    .cards-wrapper {
+        max-width: 550px;
+        margin: 0 auto; /* Centra le card nella pagina */
+    }
 
-    /* 2. Container Card Scanner */
-    .scanner-card {
+    .compact-card {
         background-color: #161b22;
         border: 1px solid #30363d;
-        border-radius: 12px;
-        padding: 20px;
-        margin-bottom: 15px;
-        transition: transform 0.2s, border-color 0.2s;
-    }
-    .scanner-card:hover {
-        border-color: #58a6ff;
-        transform: translateY(-2px);
+        border-radius: 10px;
+        padding: 12px 16px;
+        margin-bottom: 10px;
     }
 
-    /* 3. Testi Interni Card */
-    .match-header {
+    /* RIGA 1: Match e Info temporali */
+    .row-main {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        margin-bottom: 12px;
+        margin-bottom: 6px;
     }
-    .teams { font-size: 20px; font-weight: 800; color: #ffffff; }
-    .league-badge { 
-        background-color: #21262d; 
-        color: #8b949e; 
-        padding: 4px 10px; 
-        border-radius: 6px; 
-        font-size: 12px; 
-        font-weight: 600;
-    }
+    .match-name { font-size: 16px; font-weight: 700; color: #ffffff; }
+    .match-meta { font-size: 11px; color: #8b949e; text-transform: uppercase; }
 
-    .bet-type { 
-        font-size: 24px; 
-        font-weight: 900; 
-        color: #58a6ff; 
-        margin-bottom: 15px;
-    }
-
-    /* 4. Riga Dati (Stake, Valore, BK) */
-    .data-row {
+    /* RIGA 2: Dati scommessa compatti */
+    .row-data {
         display: flex;
-        gap: 25px;
-        padding-top: 15px;
-        border-top: 1px solid #30363d;
-        font-size: 14px;
+        align-items: center;
+        gap: 15px;
+        font-size: 13px;
     }
-    .data-label { color: #8b949e; margin-right: 5px; }
-    .val-green { color: #39d353; font-weight: 800; }
-    .stk-yellow { color: #f1c40f; font-weight: 800; }
-    .bk-white { color: #ffffff; font-weight: 700; }
+    .bet-highlight { color: #58a6ff; font-weight: 800; font-size: 15px; }
+    .stat-box { display: flex; align-items: center; gap: 4px; }
+    .label-min { color: #8b949e; font-size: 10px; text-transform: uppercase; }
+    
+    .val-neon { color: #39d353; font-weight: 700; }
+    .stk-gold { color: #f1c40f; font-weight: 700; }
 
-    /* 5. Pulsante "IN PORTAFOGLIO" (Stile Success) */
-    .stButton>button[disabled] {
-        background-color: #238636 !important;
-        color: white !important;
-        border: none !important;
-        opacity: 1 !important;
+    /* Stile per i pulsanti Streamlit allineati */
+    div[data-testid="stColumn"] {
+        display: flex;
+        align-items: center;
     }
     </style>
 """, unsafe_allow_html=True)
 
-# --- CORPO CENTRALE ---
-t1, t2, t3 = st.tabs(["🔍 SCANNER", "💼 PORTAFOGLIO", "📊 FISCALE"])
-
-with t1:
-    # Esempio di come apparirà una card nello scanner
+# --- RENDERING CORPO CENTRALE ---
+with st.container():
+    # Usiamo un wrapper HTML per forzare la larghezza stretta
+    st.markdown('<div class="cards-wrapper">', unsafe_allow_html=True)
+    
+    # ESEMPIO CARD 1
     st.markdown("""
-        <div class="scanner-card">
-            <div class="match-header">
-                <span class="teams">Juventus - Inter</span>
-                <span class="league-badge">🇮🇹 SERIE A | 20:45</span>
+        <div class="compact-card">
+            <div class="row-main">
+                <span class="match-name">⚽ Juventus - Inter</span>
+                <span class="match-meta">Serie A | 20:45</span>
             </div>
-            <div class="bet-type">OVER 2.5 @ 1.95</div>
-            <div class="data-row">
-                <span><span class="data-label">💰 STAKE:</span><span class="stk-highlight stk-yellow">15.40€</span></span>
-                <span><span class="data-label">🔥 VALORE:</span><span class="val-green">+5.2%</span></span>
-                <span><span class="data-label">🏛️ BOOK:</span><span class="bk-white">Bet365</span></span>
+            <div class="row-data">
+                <span class="bet-highlight">OVER 2.5 @ 1.95</span>
+                <div class="stat-box"><span class="label-min">STAKE:</span><span class="stk-gold">15.40€</span></div>
+                <div class="stat-box"><span class="label-min">VAL:</span><span class="val-neon">+5.2%</span></div>
+                <div class="stat-box" style="margin-left:auto;"><span class="label-min">🏛️</span><span style="color:white">Bet365</span></div>
             </div>
         </div>
     """, unsafe_allow_html=True)
     
-    # Pulsante Streamlit sincronizzato con la card
-    c1, c2 = st.columns([4, 1])
+    # Pulsante compatto subito sotto
+    c1, c2 = st.columns([3, 1])
     with c2:
-        if st.button("AGGIUNGI", key="btn_test"):
-            st.toast("Match aggiunto!")
+        st.button("ADD", key="add_1", use_container_width=True)
 
-    # Esempio di match già in portafoglio
+    st.markdown("---") # Separatore visivo
+
+    # ESEMPIO CARD 2 (Già in portafoglio)
     st.markdown("""
-        <div class="scanner-card" style="border-left: 4px solid #238636;">
-            <div class="match-header">
-                <span class="teams">Real Madrid - Barcelona</span>
-                <span class="league-badge">🇪🇸 LA LIGA | 21:00</span>
+        <div class="compact-card" style="border-left: 3px solid #39d353; opacity: 0.8;">
+            <div class="row-main">
+                <span class="match-name">⚽ Bari - Palermo</span>
+                <span class="match-meta">Serie B | 19:30</span>
             </div>
-            <div class="bet-type">UNDER 2.5 @ 2.10</div>
-            <div class="data-row">
-                <span><span class="data-label">💰 STAKE:</span><span class="stk-yellow">12.80€</span></span>
-                <span><span class="data-label">🔥 VALORE:</span><span class="val-green">+4.8%</span></span>
-                <span><span class="data-label">🏛️ BOOK:</span><span class="bk-white">William Hill</span></span>
+            <div class="row-data">
+                <span class="bet-highlight">UNDER 2.5 @ 2.05</span>
+                <div class="stat-box"><span class="label-min">STAKE:</span><span class="stk-gold">11.71€</span></div>
+                <div class="stat-box"><span class="label-min">VAL:</span><span class="val-neon">+12.3%</span></div>
+                <div class="stat-box" style="margin-left:auto;"><span style="color:white">William Hill</span></div>
             </div>
         </div>
     """, unsafe_allow_html=True)
     with c2:
-        st.button("✅ IN PORTAFOGLIO", key="btn_disabled", disabled=True)
+        st.button("✅ IN PORTAFOGLIO", key="add_2", disabled=True, use_container_width=True)
 
-# --- FINE STEP 2 ---
+    st.markdown('</div>', unsafe_allow_html=True) # Chiude cards-wrapper

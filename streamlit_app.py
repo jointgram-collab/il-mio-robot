@@ -1,89 +1,36 @@
 import streamlit as st
 import pandas as pd
 import requests
-from datetime import datetime
+import time
+from datetime import datetime, timedelta, date
 from streamlit_gsheets import GSheetsConnection
 
-# --- 1. CONFIGURAZIONE PAGINA ---
-st.set_page_config(page_title="AI SNIPER V13.6 - PRO", layout="wide")
+# --- CONFIGURAZIONE UI ---
+st.set_page_config(page_title="AI SNIPER V13.6 - Smart Buttons", layout="wide")
 
-# --- 2. CSS PERSONALIZZATO (SIDEBAR & UI) ---
-st.markdown("""
-    <style>
-    /* Sfondo Generale */
-    .stApp { background-color: #0b0e14; color: #ffffff; }
-
-    /* SIDEBAR HIGH-CONTRAST */
-    [data-testid="stSidebar"] {
-        background-color: #11141a;
-        border-right: 1px solid #30363d;
-    }
-
-    /* Testi e Titoli Sidebar */
-    .sb-title {
-        color: #ffffff !important;
-        font-size: 18px;
-        font-weight: 700;
-        margin-bottom: 20px;
-        display: flex;
-        align-items: center;
-        gap: 10px;
-    }
-    
-    .label-text {
-        color: #8b949e;
-        font-size: 14px;
-        font-weight: 500;
-    }
-
-    .value-text {
-        color: #ffffff;
-        font-weight: 700;
-    }
-
-    /* Styling degli Slider (Verde Neon e Bianco) */
-    div[data-testid="stSlider"] [data-baseweb="slider"] [aria-valuenow] {
-        background-color: #ffffff !important;
-        border: 2px solid #39d353 !important;
-    }
-
-    /* API Metric Box */
-    .api-container {
-        background-color: #1c2128;
-        padding: 15px;
-        border-radius: 8px;
-        border: 1px solid #444c56;
-        margin-bottom: 20px;
-    }
-    
-    .api-row { display: flex; justify-content: space-between; margin-bottom: 5px; }
-    
-    /* Barra di progresso verde */
-    .api-bar-bg { background: #30363d; height: 8px; border-radius: 4px; overflow: hidden; margin-top: 10px; }
-    .api-bar-fill { background: #39d353; height: 100%; border-radius: 4px; box-shadow: 0 0 8px #39d353; }
-
-    /* Fix scritte Streamlit */
-    [data-testid="stWidgetLabel"] p {
-        color: #ffffff !important;
-        font-size: 15px !important;
-    }
-    
-    /* Tabs styling */
-    .stTabs [data-baseweb="tab-list"] { gap: 10px; }
-    .stTabs [data-baseweb="tab"] {
-        background-color: #1c2128;
-        border-radius: 5px 5px 0 0;
-        padding: 10px 20px;
-        color: #8b949e;
-    }
-    .stTabs [aria-selected="true"] { background-color: #39d353 !important; color: #000 !important; }
-    </style>
-""", unsafe_allow_html=True)
-
-# --- 3. LOGICA DATABASE (GOOGLE SHEETS) ---
 conn = st.connection("gsheets", type=GSheetsConnection)
 API_KEY = '01f1c8f2a314814b17de03eeb6c53623'
 
+if 'api_usage' not in st.session_state:
+    st.session_state['api_usage'] = {'remaining': "N/D", 'used': "N/D"}
+if 'api_data' not in st.session_state:
+    st.session_state['api_data'] = []
+
+BK_EURO_AUTH = ["Bet365", "Snai", "Better", "Planetwin365", "Eurobet", "Goldbet", "Sisal", "Bwin", "William Hill", "888sport"]
+
+LEAGUE_NAMES = {
+    "soccer_italy_serie_a": "🇮🇹 Serie A", 
+    "soccer_italy_serie_b": "🇮🇹 Serie B",
+    "soccer_epl": "🏴󠁧󠁢󠁥󠁮󠁧󠁿 Premier League", 
+    "soccer_netherlands_eredivisie": "🇳🇱 Eredivisie",
+    "soccer_spain_la_liga": "🇪🇸 La Liga", 
+    "soccer_germany_bundesliga": "🇩🇪 Bundesliga",
+    "soccer_france_ligue_1": "🇫🇷 Ligue 1",
+    "soccer_uefa_europa_league": "🇪🇺 Europa League",
+    "soccer_uefa_champions_league": "🏆 Champions"
+}
+
+# --- MOTORE DATABASE ---
 def carica_db():
     try:
         df = conn.read(worksheet="Giocate", ttl=0)
@@ -95,96 +42,201 @@ def salva_db(df):
     conn.update(worksheet="Giocate", data=df)
     st.cache_data.clear()
 
+def get_champions_key():
+    try:
+        r = requests.get(f'https://api.the-odds-api.com/v4/sports/?api_key={API_KEY}')
+        if r.status_code == 200:
+            for s in r.json():
+                if "Champions League" in s.get('title', ''): return s.get('key')
+        return "soccer_uefa_champions_league"
+    except: return "soccer_uefa_champions_league"
+
+def check_results():
+    df = carica_db()
+    pendenti = df[df['Esito'] == "Pendente"]
+    if pendenti.empty:
+        st.info("Nessuna scommessa pendente.")
+        return
+    cambiamenti = False
+    with st.spinner("🔄 Verifica risultati..."):
+        for skey in pendenti['Sport_Key'].unique():
+            res = requests.get(f'https://api.the-odds-api.com/v4/sports/{skey}/scores/', params={'api_key': API_KEY, 'daysFrom': 3})
+            if res.status_code == 200:
+                scores = res.json()
+                for i, r in pendenti[pendenti['Sport_Key'] == skey].iterrows():
+                    m_res = next((m for m in scores if f"{m['home_team']}-{m['away_team']}" == r['Match'] and m.get('completed')), None)
+                    if m_res:
+                        s = m_res['scores']
+                        if s:
+                            s1, s2 = int(s[0]['score']), int(s[1]['score'])
+                            vinto = (s1 + s2) > 2.5 if r['Scelta'] == "OVER 2.5" else (s1 + s2) < 2.5
+                            df.at[i, 'Esito'] = "VINTO" if vinto else "PERSO"
+                            df.at[i, 'Risultato'] = f"{s1}-{s2}"
+                            df.at[i, 'Profitto'] = round((r['Stake'] * r['Quota']) - r['Stake'], 2) if vinto else -r['Stake']
+                            cambiamenti = True
+    if cambiamenti:
+        salva_db(df)
+        st.rerun()
+
+# --- INTERFACCIA ---
+st.title("🎯 AI SNIPER V13.6")
 df_attuale = carica_db()
 
-# --- 4. SIDEBAR CON NUOVA GRAFICA ---
 with st.sidebar:
-    st.markdown('<div class="sb-title">🔥 API Status</div>', unsafe_allow_html=True)
-    
-    # Recupero crediti API reali dallo stato sessione
-    api_rem = st.session_state.get('api_rem', "N/D")
-    # Calcolo percentuale utilizzo (esempio basato su 500 totali)
-    total_credits = 500
-    try:
-        rem_int = int(api_rem)
-        perc = int(((total_credits - rem_int) / total_credits) * 100)
-    except:
-        perc = 0
-    
-    st.markdown(f"""
-        <div class="api-container">
-            <div class="api-row">
-                <span class="label-text">Residui:</span>
-                <span class="value-text">{api_rem}</span>
-            </div>
-            <div style="margin-top:15px; display:flex; justify-content:space-between;">
-                <span class="label-text">Utilizzo API</span>
-                <span style="color:#39d353; font-weight:bold;">{perc}%</span>
-            </div>
-            <div class="api-bar-bg"><div class="api-bar-fill" style="width: {perc}%;"></div></div>
-        </div>
-    """, unsafe_allow_html=True)
-    
-    st.markdown("---")
-    st.markdown('<div class="sb-title">📊 Parametri Strategia</div>', unsafe_allow_html=True)
-    
-    budget = st.slider("Budget (€)", 100, 2000, 500)
-    kelly = st.slider("Kelly Criterion", 0.05, 0.50, 0.20)
-    valore_min = st.slider("Valore Minimo %", 0, 20, 3) / 100
-
-    st.markdown("---")
-    st.markdown('<div class="sb-title">⚙️ Impostazioni</div>', unsafe_allow_html=True)
-    if st.button("Svuota Cache"):
-        st.cache_data.clear()
-        st.success("Cache pulita!")
-
-# --- 5. CORPO CENTRALE ---
-st.markdown("<h1 style='color:white;'>🎯 AI SNIPER <span style='font-size:15px; color:#39d353;'>V13.6</span></h1>", unsafe_allow_html=True)
+    st.header("📊 Stato API")
+    c1, c2 = st.columns(2)
+    c1.metric("Residui", st.session_state['api_usage']['remaining'])
+    c2.metric("Usati", st.session_state['api_usage']['used'])
+    st.divider()
+    budget_cassa = st.number_input("Budget (€)", value=500.0)
+    rischio = st.slider("Kelly", 0.05, 0.50, 0.20)
+    soglia_val = st.slider("Valore Min %", 0, 15, 3) / 100
 
 t1, t2, t3 = st.tabs(["🔍 SCANNER", "💼 PORTAFOGLIO", "📊 FISCALE"])
 
 # --- TAB 1: SCANNER ---
 with t1:
-    c1, c2 = st.columns([3, 1])
-    sport = c1.selectbox("Seleziona Sport/Campionato", ["soccer_italy_serie_a", "soccer_epl", "soccer_spain_la_liga", "soccer_germany_bundesliga"])
+    leagues = {v: k for k, v in LEAGUE_NAMES.items()}
+    c_sel, c_all, c_sing, c_ore = st.columns([1.5, 1, 1, 1])
     
-    if c2.button("🚀 AVVIA SCAN", use_container_width=True):
-        with st.spinner("Scansione mercati in corso..."):
-            url = f"https://api.the-odds-api.com/v4/sports/{sport}/odds/"
-            params = {'api_key': API_KEY, 'regions': 'eu', 'markets': 'totals', 'oddsFormat': 'decimal'}
-            response = requests.get(url, params=params)
-            
-            if response.status_code == 200:
-                st.session_state['data'] = response.json()
-                st.session_state['api_rem'] = response.headers.get('x-requests-remaining')
-                st.success(f"Scan completato! Crediti rimasti: {st.session_state['api_rem']}")
-            else:
-                st.error("Errore API. Controlla la chiave o i crediti.")
+    sel_name = c_sel.selectbox("Campionato Singolo:", list(leagues.keys()))
+    ore_limite = c_ore.selectbox("Finestra Ore:", [24, 48, 72, 96, 120, 168], index=2)
+    
+    if c_all.button("🚀 TOTALE", use_container_width=True):
+        all_found = []
+        keys_to_scan = list(LEAGUE_NAMES.keys())
+        pbar = st.progress(0)
+        limit_date = datetime.utcnow() + timedelta(hours=ore_limite)
+        for idx, k in enumerate(set(keys_to_scan)):
+            r = requests.get(f'https://api.the-odds-api.com/v4/sports/{k}/odds/', params={'api_key': API_KEY, 'regions': 'eu', 'markets': 'totals'})
+            if r.status_code == 200:
+                data = r.json()
+                filtered = [m for m in data if datetime.strptime(m['commence_time'], "%Y-%m-%dT%H:%M:%SZ") <= limit_date]
+                all_found.extend(filtered)
+                st.session_state['api_usage']['remaining'] = r.headers.get('x-requests-remaining')
+            time.sleep(0.4)
+            pbar.progress((idx + 1) / len(set(keys_to_scan)))
+        st.session_state['api_data'] = all_found
+        st.rerun()
 
-    if 'data' in st.session_state:
-        st.write("### Risultati Analisi")
-        st.dataframe(pd.DataFrame(st.session_state['data']).head(10)) # Visualizzazione base per 13.6
-        st.info("Logica di calcolo Value Bet attiva in background.")
+    if c_sing.button("🔍 SINGOLA", use_container_width=True):
+        target_key = get_champions_key() if "Champions" in sel_name else leagues[sel_name]
+        res = requests.get(f'https://api.the-odds-api.com/v4/sports/{target_key}/odds/', params={'api_key': API_KEY, 'regions': 'eu', 'markets': 'totals'})
+        if res.status_code == 200:
+            data = res.json()
+            limit_date = datetime.utcnow() + timedelta(hours=ore_limite)
+            st.session_state['api_data'] = [m for m in data if datetime.strptime(m['commence_time'], "%Y-%m-%dT%H:%M:%SZ") <= limit_date]
+            st.session_state['api_usage']['remaining'] = res.headers.get('x-requests-remaining')
+            st.rerun()
 
+    if st.session_state['api_data']:
+        # Lista match pendenti per il controllo
+        pend_list = df_attuale[df_attuale['Esito'] == "Pendente"]['Match'].tolist()
+        
+        for i, m in enumerate(st.session_state['api_data']):
+            try:
+                nome_m = f"{m['home_team']}-{m['away_team']}"
+                dt_m = datetime.strptime(m['commence_time'], "%Y-%m-%dT%H:%M:%SZ").strftime("%d/%m %H:%M")
+                opts = []
+                for b in m.get('bookmakers', []):
+                    if b['title'] in BK_EURO_AUTH:
+                        mk = next((x for x in b['markets'] if x['key'] == 'totals'), None)
+                        if mk:
+                            q_ov = next((o['price'] for o in mk['outcomes'] if o['name'] == 'Over' and float(o.get('point',0)) == 2.5), None)
+                            q_un = next((o['price'] for o in mk['outcomes'] if o['name'] == 'Under' and float(o.get('point',0)) == 2.5), None)
+                            if q_ov: opts.append({"T": "OVER 2.5", "Q": q_ov, "P": (1/q_ov)+0.06, "BK": b['title']})
+                            if q_un: opts.append({"T": "UNDER 2.5", "Q": q_un, "P": (1/q_un)+0.06, "BK": b['title']})
+                
+                if opts:
+                    best = max(opts, key=lambda x: (x['P'] * x['Q']) - 1)
+                    val = (best['P'] * best['Q']) - 1
+                    if val >= soglia_val:
+                        stk_c = round(max(2.0, min(budget_cassa * (val/(best['Q']-1)) * rischio, budget_cassa*0.15)), 2)
+                        
+                        c_a, c_b = st.columns([3, 1])
+                        c_a.markdown(f"📅 {dt_m} | **{nome_m}** | {m['sport_title']}<br>🎯 Giocata: **{best['T']}** @{best['Q']} | Stake: **{stk_c}€** | Val: **{round(val*100,1)}%** | 🏦 {best['BK']}", unsafe_allow_html=True)
+                        
+                        # LOGICA PULSANTE INTELLIGENTE
+                        gia_presente = nome_m in pend_list
+                        
+                        if gia_presente:
+                            c_b.button("✅ IN PORTAFOGLIO", key=f"add_{i}", disabled=True, use_container_width=True)
+                            # Applichiamo stile verde via markdown per il pulsante disabilitato
+                            st.markdown("""<style>button[disabled] { background-color: #2e7d32 !important; color: white !important; }</style>""", unsafe_allow_html=True)
+                        else:
+                            if c_b.button(f"ADD", key=f"add_{i}", use_container_width=True):
+                                nuova = pd.DataFrame([{"Data Match": dt_m, "Match": nome_m, "Scelta": best['T'], "Quota": best['Q'], "Stake": stk_c, "Bookmaker": best['BK'], "Esito": "Pendente", "Profitto": 0.0, "Sport_Key": m['sport_key'], "Risultato": "-"}])
+                                salva_db(pd.concat([carica_db(), nuova], ignore_index=True))
+                                st.rerun()
+                        st.divider()
+            except: continue
+
+# ... (Il resto del codice per TAB 2 e TAB 3 rimane lo stesso della V13.5) ...
 # --- TAB 2: PORTAFOGLIO ---
 with t2:
-    pendenti = df_attuale[df_attuale['Esito'] == "Pendente"]
-    if not pendenti.empty:
-        st.table(pendenti[["Data Match", "Match", "Scelta", "Quota", "Stake"]])
-    else:
-        st.write("Nessuna scommessa pendente.")
+    df_p = df_attuale[df_attuale['Esito'] == "Pendente"]
+    if not df_p.empty:
+        tot_impegnato = round(df_p['Stake'].sum(), 2)
+        ritorno_potenziale = round((df_p['Stake'] * df_p['Quota']).sum(), 2)
+        st.markdown(f"""
+            <div style='background-color: #0e1117; padding: 15px; border-radius: 10px; border: 1px solid #30363d; margin-bottom: 20px;'>
+                <table style='width: 100%; border: none;'>
+                    <tr>
+                        <td style='text-align: center; border: none;'>
+                            <span style='color: white; font-size: 0.9em; font-weight: bold;'>TOTALE IMPEGNATO</span><br>
+                            <span style='font-size: 1.5em; font-weight: bold; color: #ffc107;'>{tot_impegnato} €</span>
+                        </td>
+                        <td style='text-align: center; border: none; border-left: 1px solid #30363d;'>
+                            <span style='color: white; font-size: 0.9em; font-weight: bold;'>RITORNO POTENZIALE</span><br>
+                            <span style='font-size: 1.5em; font-weight: bold; color: #00ff00;'>{ritorno_potenziale} €</span>
+                        </td>
+                    </tr>
+                </table>
+            </div>
+            """, unsafe_allow_html=True)
+    st.button("🔄 AGGIORNA RISULTATI", on_click=check_results, use_container_width=True)
+    st.markdown("<br>", unsafe_allow_html=True)
+    if not df_p.empty:
+        for i, r in df_p.iterrows():
+            vinc_p = round(r['Stake'] * r['Quota'], 2)
+            league_name = LEAGUE_NAMES.get(r['Sport_Key'], r['Sport_Key'].split("_")[-1].upper())
+            c1, c2 = st.columns([18, 1])
+            c1.markdown(f"""
+                <div style='background-color: rgba(255, 193, 7, 0.1); padding: 5px 10px; border-radius: 5px; margin-bottom: 2px; border-left: 4px solid #ffc107;'>
+                    <b>{r['Match']}</b> ({league_name}) | <b>{r['Scelta']}</b> @{r['Quota']} | Stake: {r['Stake']}€ | Vincita: {vinc_p}€ | 🏦 {r['Bookmaker']}
+                </div>
+                """, unsafe_allow_html=True)
+            if c2.button("🗑️", key=f"del_{i}"):
+                salva_db(df_attuale.drop(i))
+                st.rerun()
+    else: st.info("Nessuna giocata pendente.")
 
 # --- TAB 3: FISCALE ---
 with t3:
-    st.write("### Storico Giocate")
-    st.dataframe(df_attuale, use_container_width=True)
-    
+    st.subheader("🏁 Cruscotto Finanziario")
     if not df_attuale.empty:
-        vinto = df_attuale[df_attuale['Profitto'] > 0]['Profitto'].sum()
-        perso = df_attuale[df_attuale['Profitto'] < 0]['Profitto'].abs().sum()
-        netto = vinto - perso
-        
-        c_v, c_p, c_n = st.columns(3)
-        c_v.metric("Totale Vinto", f"{vinto:.2f} €")
-        c_p.metric("Totale Perso", f"{perso:.2f} €")
-        c_n.metric("Profitto Netto", f"{netto:.2f} €", delta=f"{netto:.2f}")
+        tot_giocato = round(df_attuale['Stake'].sum(), 2)
+        tot_vinto = round(df_attuale[df_attuale['Esito'] == "VINTO"]['Profitto'].sum() + df_attuale[df_attuale['Esito'] == "VINTO"]['Stake'].sum(), 2)
+        tot_perso = round(df_attuale[df_attuale['Esito'] == "PERSO"]['Stake'].sum(), 2)
+        prof_netto = round(df_attuale['Profitto'].sum(), 2)
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("💰 Giocato", f"{tot_giocato} €")
+        m2.metric("✅ Vinto", f"{tot_vinto} €")
+        m3.metric("❌ Perso", f"{tot_perso} €")
+        m4.metric("📈 Netto", f"{prof_netto} €")
+        st.divider()
+        col_exp, col_imp = st.columns(2)
+        with col_exp:
+            csv_data = df_attuale.to_csv(index=False).encode('utf-8')
+            st.download_button("📥 SCARICA CSV", data=csv_data, file_name=f"sniper_backup_{date.today()}.csv", use_container_width=True)
+        with col_imp:
+            up_file = st.file_uploader("Carica Backup CSV", type="csv")
+            if up_file and st.button("🔄 RIPRISTINA", use_container_width=True):
+                salva_db(pd.read_csv(up_file))
+                st.rerun()
+        st.divider()
+        def color_row(row):
+            if row['Esito'] == "VINTO": return ['background-color: rgba(0, 255, 0, 0.15)'] * len(row)
+            if row['Esito'] == "PERSO": return ['background-color: rgba(255, 0, 0, 0.15)'] * len(row)
+            return ['background-color: rgba(255, 255, 0, 0.15)'] * len(row)
+        st.dataframe(df_attuale[["Data Match", "Match", "Scelta", "Quota", "Stake", "Esito", "Profitto", "Risultato", "Bookmaker"]].sort_index(ascending=False).style.apply(color_row, axis=1), use_container_width=True)

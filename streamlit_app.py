@@ -1,69 +1,66 @@
 import streamlit as st
 
-# --- AGGIORNAMENTO CSS STEP 2: EMBEDDED BUTTONS ---
+# --- CSS DEFINITIVO PER RIGHE SINGOLE E COMPATTE ---
 st.markdown("""
     <style>
-    .main-content-wrapper {
-        max-width: 550px;
+    /* Container principale stretto */
+    .main-wrapper {
+        max-width: 500px;
         margin: 0 auto;
     }
 
-    /* Container relativo per permettere al pulsante di sovrapporsi */
-    .card-container {
-        position: relative;
-        margin-bottom: 10px;
-    }
-
-    .compact-card {
+    /* LA CARD: Un unico blocco orizzontale */
+    .single-line-card {
         background-color: #161b22;
         border: 1px solid #30363d;
         border-radius: 8px;
-        padding: 10px 14px;
-        /* Lasciamo spazio a destra per l'icona */
-        padding-right: 50px; 
+        padding: 8px 12px;
+        margin-bottom: 6px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between; /* Spinge il testo a sx e il tasto a dx */
     }
 
-    .r1 { display: flex; justify-content: space-between; margin-bottom: 4px; }
-    .teams { font-size: 14px; font-weight: 700; color: #ffffff; }
-    .meta { font-size: 10px; color: #8b949e; }
-
-    .r2 { display: flex; gap: 12px; align-items: center; }
-    .bet { color: #58a6ff; font-weight: 800; font-size: 13px; }
-    .stat { font-size: 11px; color: #ffffff; }
-    .dim { color: #8b949e; font-size: 9px; margin-right: 2px; }
-
-    /* POSIZIONAMENTO PULSANTE DENTRO LA CARD */
-    .button-overlay {
-        position: absolute;
-        top: 12px;
-        right: 12px;
-        z-index: 10;
+    /* Area Testo */
+    .card-content {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        overflow: hidden; /* Evita che il testo lunghi rompa la riga */
     }
 
-    /* Reset stile pulsante Streamlit per farlo sembrare un'icona */
-    .button-overlay .stButton>button {
-        width: 30px !important;
-        height: 30px !important;
+    .t-row1 { font-size: 13px; font-weight: 700; color: #ffffff; white-space: nowrap; }
+    .t-row2 { font-size: 11px; display: flex; gap: 10px; align-items: center; }
+    
+    .q-blue { color: #58a6ff; font-weight: 800; }
+    .s-yellow { color: #f1c40f; }
+    .v-green { color: #39d353; font-weight: 700; }
+    .meta-gray { color: #8b949e; font-size: 9px; }
+
+    /* Area Pulsante: Forza il posizionamento a destra */
+    .action-area {
+        min-width: 40px;
+        display: flex;
+        justify-content: flex-end;
+    }
+
+    /* FIX PULSANTE STREAMLIT */
+    .stButton > button {
+        width: 32px !important;
+        height: 32px !important;
         padding: 0 !important;
-        border-radius: 4px !important;
+        border-radius: 6px !important;
         background-color: #21262d !important;
-        border: 1px solid #444c56 !important;
+        border: 1px solid #30363d !important;
         color: #ffffff !important;
-        font-size: 14px !important;
-        line-height: 1 !important;
+        font-size: 16px !important;
         display: flex;
         align-items: center;
         justify-content: center;
     }
 
-    .button-overlay .stButton>button:hover {
-        border-color: #58a6ff !important;
-        color: #58a6ff !important;
-    }
-
-    /* Icona GESTITO (Verde) */
-    .button-overlay .stButton>button[disabled] {
-        background-color: transparent !important;
+    .stButton > button[disabled] {
+        background-color: rgba(57, 211, 83, 0.1) !important;
         color: #39d353 !important;
         border: 1px solid #39d353 !important;
         opacity: 1 !important;
@@ -72,46 +69,43 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- RENDERING ---
-st.markdown('<div class="main-content-wrapper">', unsafe_allow_html=True)
+st.markdown('<div class="main-wrapper">', unsafe_allow_html=True)
 
-# ESEMPIO 1: MATCH DISPONIBILE
-st.markdown('<div class="card-container">', unsafe_allow_html=True)
-# Sfondo della card
-st.markdown("""
-    <div class="compact-card">
-        <div class="r1">
-            <span class="teams">⚽ Juventus - Inter</span>
-            <span class="meta">SERIE A | 20:45</span>
-        </div>
-        <div class="r2">
-            <span class="bet">OVER 2.5 @ 1.95</span>
-            <span class="stat"><span class="dim">STK:</span><span style="color:#f1c40f">15.4€</span></span>
-            <span class="stat"><span class="dim">VAL:</span><span style="color:#39d353">+5.2%</span></span>
-        </div>
-    </div>
-""", unsafe_allow_html=True)
-# Pulsante sovrapposto
-st.markdown('<div class="button-overlay">', unsafe_allow_html=True)
-st.button("＋", key="add_inner_1")
-st.markdown('</div></div>', unsafe_allow_html=True)
+# --- ESEMPIO 1: DISPONIBILE ---
+# Usiamo un layout a 2 colonne reali di Streamlit ma con CSS per bloccare il wrap
+c_txt, c_btn = st.columns([5, 1])
 
-# ESEMPIO 2: MATCH GIÀ GESTITO
-st.markdown('<div class="card-container">', unsafe_allow_html=True)
-st.markdown("""
-    <div class="compact-card" style="border-left: 3px solid #39d353;">
-        <div class="r1">
-            <span class="teams">⚽ Bari - Palermo</span>
-            <span class="meta">SERIE B | 19:30</span>
+with c_txt:
+    st.markdown("""
+        <div class="card-content">
+            <div class="t-row1">⚽ Juve - Inter <span class="meta-gray">| 20:45</span></div>
+            <div class="t-row2">
+                <span class="q-blue">OV 2.5 @1.95</span>
+                <span class="s-yellow">S: 15€</span>
+                <span class="v-green">+5%</span>
+            </div>
         </div>
-        <div class="r2">
-            <span class="bet">UNDER 2.5 @ 2.05</span>
-            <span class="stat"><span class="dim">STK:</span><span style="color:#f1c40f">11.7€</span></span>
-            <span class="stat"><span class="dim">VAL:</span><span style="color:#39d353">+12.3%</span></span>
+    """, unsafe_allow_html=True)
+
+with c_btn:
+    st.button("＋", key="m1")
+
+# --- ESEMPIO 2: GESTITO ---
+c_txt2, c_btn2 = st.columns([5, 1])
+
+with c_txt2:
+    st.markdown("""
+        <div class="card-content" style="border-left: 2px solid #39d353; padding-left: 8px;">
+            <div class="t-row1">⚽ Bari - Palermo <span class="meta-gray">| 19:30</span></div>
+            <div class="t-row2">
+                <span class="q-blue">UN 2.5 @2.05</span>
+                <span class="s-yellow">S: 11€</span>
+                <span class="v-green">+12%</span>
+            </div>
         </div>
-    </div>
-""", unsafe_allow_html=True)
-st.markdown('<div class="button-overlay">', unsafe_allow_html=True)
-st.button("✔", key="add_inner_2", disabled=True)
-st.markdown('</div></div>', unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
+
+with c_btn2:
+    st.button("✔", key="m2", disabled=True)
 
 st.markdown('</div>', unsafe_allow_html=True)

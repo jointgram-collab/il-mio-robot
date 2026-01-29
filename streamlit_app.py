@@ -1,4 +1,4 @@
-import streamlit as st # <--- FIX: Corretto da 'import st' a 'import streamlit as st'
+import streamlit as st
 import pandas as pd
 import requests
 import time
@@ -6,12 +6,11 @@ from datetime import datetime, timedelta, date
 from streamlit_gsheets import GSheetsConnection
 
 # --- CONFIGURAZIONE UI ---
-st.set_page_config(page_title="AI SNIPER V13.5 - Bug Fix", layout="wide")
+st.set_page_config(page_title="AI SNIPER V13.6 - Smart Buttons", layout="wide")
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 API_KEY = '01f1c8f2a314814b17de03eeb6c53623'
 
-# ... resto del codice identico alla versione precedente ...
 if 'api_usage' not in st.session_state:
     st.session_state['api_usage'] = {'remaining': "N/D", 'used': "N/D"}
 if 'api_data' not in st.session_state:
@@ -80,7 +79,7 @@ def check_results():
         st.rerun()
 
 # --- INTERFACCIA ---
-st.title("🎯 AI SNIPER V13.4")
+st.title("🎯 AI SNIPER V13.6")
 df_attuale = carica_db()
 
 with st.sidebar:
@@ -95,7 +94,7 @@ with st.sidebar:
 
 t1, t2, t3 = st.tabs(["🔍 SCANNER", "💼 PORTAFOGLIO", "📊 FISCALE"])
 
-# --- TAB 1: SCANNER (RIPRISTINATA SCANSIONE SINGOLA) ---
+# --- TAB 1: SCANNER ---
 with t1:
     leagues = {v: k for k, v in LEAGUE_NAMES.items()}
     c_sel, c_all, c_sing, c_ore = st.columns([1.5, 1, 1, 1])
@@ -103,7 +102,6 @@ with t1:
     sel_name = c_sel.selectbox("Campionato Singolo:", list(leagues.keys()))
     ore_limite = c_ore.selectbox("Finestra Ore:", [24, 48, 72, 96, 120, 168], index=2)
     
-    # PULSANTE SCANSIONE TOTALE
     if c_all.button("🚀 TOTALE", use_container_width=True):
         all_found = []
         keys_to_scan = list(LEAGUE_NAMES.keys())
@@ -121,7 +119,6 @@ with t1:
         st.session_state['api_data'] = all_found
         st.rerun()
 
-    # PULSANTE SCANSIONE SINGOLA (CORRETTO)
     if c_sing.button("🔍 SINGOLA", use_container_width=True):
         target_key = get_champions_key() if "Champions" in sel_name else leagues[sel_name]
         res = requests.get(f'https://api.the-odds-api.com/v4/sports/{target_key}/odds/', params={'api_key': API_KEY, 'regions': 'eu', 'markets': 'totals'})
@@ -133,7 +130,9 @@ with t1:
             st.rerun()
 
     if st.session_state['api_data']:
+        # Lista match pendenti per il controllo
         pend_list = df_attuale[df_attuale['Esito'] == "Pendente"]['Match'].tolist()
+        
         for i, m in enumerate(st.session_state['api_data']):
             try:
                 nome_m = f"{m['home_team']}-{m['away_team']}"
@@ -153,15 +152,26 @@ with t1:
                     val = (best['P'] * best['Q']) - 1
                     if val >= soglia_val:
                         stk_c = round(max(2.0, min(budget_cassa * (val/(best['Q']-1)) * rischio, budget_cassa*0.15)), 2)
+                        
                         c_a, c_b = st.columns([3, 1])
                         c_a.markdown(f"📅 {dt_m} | **{nome_m}** | {m['sport_title']}<br>🎯 Giocata: **{best['T']}** @{best['Q']} | Stake: **{stk_c}€** | Val: **{round(val*100,1)}%** | 🏦 {best['BK']}", unsafe_allow_html=True)
-                        if c_b.button(f"ADD", key=f"add_{i}", disabled=(nome_m in pend_list), use_container_width=True):
-                            nuova = pd.DataFrame([{"Data Match": dt_m, "Match": nome_m, "Scelta": best['T'], "Quota": best['Q'], "Stake": stk_c, "Bookmaker": best['BK'], "Esito": "Pendente", "Profitto": 0.0, "Sport_Key": m['sport_key'], "Risultato": "-"}])
-                            salva_db(pd.concat([carica_db(), nuova], ignore_index=True))
-                            st.rerun()
+                        
+                        # LOGICA PULSANTE INTELLIGENTE
+                        gia_presente = nome_m in pend_list
+                        
+                        if gia_presente:
+                            c_b.button("✅ IN PORTAFOGLIO", key=f"add_{i}", disabled=True, use_container_width=True)
+                            # Applichiamo stile verde via markdown per il pulsante disabilitato
+                            st.markdown("""<style>button[disabled] { background-color: #2e7d32 !important; color: white !important; }</style>""", unsafe_allow_html=True)
+                        else:
+                            if c_b.button(f"ADD", key=f"add_{i}", use_container_width=True):
+                                nuova = pd.DataFrame([{"Data Match": dt_m, "Match": nome_m, "Scelta": best['T'], "Quota": best['Q'], "Stake": stk_c, "Bookmaker": best['BK'], "Esito": "Pendente", "Profitto": 0.0, "Sport_Key": m['sport_key'], "Risultato": "-"}])
+                                salva_db(pd.concat([carica_db(), nuova], ignore_index=True))
+                                st.rerun()
                         st.divider()
             except: continue
 
+# ... (Il resto del codice per TAB 2 e TAB 3 rimane lo stesso della V13.5) ...
 # --- TAB 2: PORTAFOGLIO ---
 with t2:
     df_p = df_attuale[df_attuale['Esito'] == "Pendente"]

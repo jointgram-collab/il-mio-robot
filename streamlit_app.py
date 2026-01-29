@@ -1,66 +1,60 @@
 import streamlit as st
 
-# --- CSS DEFINITIVO PER RIGHE SINGOLE E COMPATTE ---
+# --- CSS DEFINITIVO: SINGLE LINE DESIGN ---
 st.markdown("""
     <style>
-    /* Container principale stretto */
+    /* Reset per Mobile */
+    .block-container { padding-top: 1rem; padding-bottom: 0rem; }
+    
     .main-wrapper {
-        max-width: 500px;
+        max-width: 650px;
         margin: 0 auto;
     }
 
-    /* LA CARD: Un unico blocco orizzontale */
-    .single-line-card {
+    /* CARD ORIZZONTALE */
+    .inline-card {
         background-color: #161b22;
         border: 1px solid #30363d;
-        border-radius: 8px;
-        padding: 8px 12px;
-        margin-bottom: 6px;
+        border-radius: 6px;
+        padding: 6px 10px;
+        margin-bottom: 5px;
         display: flex;
         align-items: center;
-        justify-content: space-between; /* Spinge il testo a sx e il tasto a dx */
+        justify-content: space-between;
     }
 
-    /* Area Testo */
-    .card-content {
+    /* CONTENUTO IN LINEA */
+    .card-data {
         display: flex;
-        flex-direction: column;
-        gap: 2px;
-        overflow: hidden; /* Evita che il testo lunghi rompa la riga */
+        align-items: center;
+        gap: 8px; /* Spazio tra gli elementi */
+        flex-wrap: nowrap;
+        overflow: hidden;
     }
 
-    .t-row1 { font-size: 13px; font-weight: 700; color: #ffffff; white-space: nowrap; }
-    .t-row2 { font-size: 11px; display: flex; gap: 10px; align-items: center; }
+    .t-name { font-size: 13px; font-weight: 700; color: #ffffff; white-space: nowrap; }
+    .t-bet { font-size: 13px; font-weight: 800; color: #58a6ff; white-space: nowrap; }
+    .t-math { font-size: 11px; color: #8b949e; white-space: nowrap; }
     
-    .q-blue { color: #58a6ff; font-weight: 800; }
-    .s-yellow { color: #f1c40f; }
-    .v-green { color: #39d353; font-weight: 700; }
-    .meta-gray { color: #8b949e; font-size: 9px; }
+    .val-neon { color: #39d353; font-weight: 700; }
+    .stk-gold { color: #f1c40f; font-weight: 700; }
 
-    /* Area Pulsante: Forza il posizionamento a destra */
-    .action-area {
-        min-width: 40px;
-        display: flex;
-        justify-content: flex-end;
-    }
-
-    /* FIX PULSANTE STREAMLIT */
+    /* ICONA AZIONE PICCOLA */
     .stButton > button {
-        width: 32px !important;
-        height: 32px !important;
+        width: 28px !important;
+        height: 28px !important;
+        min-width: 28px !important;
         padding: 0 !important;
-        border-radius: 6px !important;
+        border-radius: 4px !important;
+        font-size: 14px !important;
         background-color: #21262d !important;
         border: 1px solid #30363d !important;
-        color: #ffffff !important;
-        font-size: 16px !important;
-        display: flex;
-        align-items: center;
-        justify-content: center;
+        color: white !important;
     }
 
+    /* Icona GESTITO (Verde) */
     .stButton > button[disabled] {
-        background-color: rgba(57, 211, 83, 0.1) !important;
+        background-color: transparent !important;
         color: #39d353 !important;
         border: 1px solid #39d353 !important;
         opacity: 1 !important;
@@ -71,41 +65,34 @@ st.markdown("""
 # --- RENDERING ---
 st.markdown('<div class="main-wrapper">', unsafe_allow_html=True)
 
-# --- ESEMPIO 1: DISPONIBILE ---
-# Usiamo un layout a 2 colonne reali di Streamlit ma con CSS per bloccare il wrap
-c_txt, c_btn = st.columns([5, 1])
-
-with c_txt:
-    st.markdown("""
-        <div class="card-content">
-            <div class="t-row1">⚽ Juve - Inter <span class="meta-gray">| 20:45</span></div>
-            <div class="t-row2">
-                <span class="q-blue">OV 2.5 @1.95</span>
-                <span class="s-yellow">S: 15€</span>
-                <span class="v-green">+5%</span>
+# --- FUNZIONE PER GENERARE LA RIGA ---
+def riga_match(id, squadre, giocata, quota, stake, valore, gestito=False):
+    c_info, c_btn = st.columns([10, 1]) # Rapporto molto sbilanciato per tenere tutto a sinistra
+    
+    with c_info:
+        # Tutto il testo viene generato in un unico blocco flex
+        st.markdown(f"""
+            <div class="inline-card">
+                <div class="card-data">
+                    <span class="t-name">⚽ {squadre}</span>
+                    <span class="t-bet">{giocata} @{quota}</span>
+                    <span class="t-math">
+                        <span class="stk-gold">S:{stake}€</span> | 
+                        <span class="val-neon">V:+{valore}%</span>
+                    </span>
+                </div>
             </div>
-        </div>
-    """, unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
+    
+    with c_btn:
+        if not gestito:
+            st.button("＋", key=f"add_{id}")
+        else:
+            st.button("✔", key=f"chk_{id}", disabled=True)
 
-with c_btn:
-    st.button("＋", key="m1")
-
-# --- ESEMPIO 2: GESTITO ---
-c_txt2, c_btn2 = st.columns([5, 1])
-
-with c_txt2:
-    st.markdown("""
-        <div class="card-content" style="border-left: 2px solid #39d353; padding-left: 8px;">
-            <div class="t-row1">⚽ Bari - Palermo <span class="meta-gray">| 19:30</span></div>
-            <div class="t-row2">
-                <span class="q-blue">UN 2.5 @2.05</span>
-                <span class="s-yellow">S: 11€</span>
-                <span class="v-green">+12%</span>
-            </div>
-        </div>
-    """, unsafe_allow_html=True)
-
-with c_btn2:
-    st.button("✔", key="m2", disabled=True)
+# --- ESEMPI REALI ---
+riga_match(1, "Juve-Inter", "OV 2.5", "1.95", "15.4", "5.2")
+riga_match(2, "Bari-Palermo", "UN 2.5", "2.05", "11.7", "12.3", gestito=True)
+riga_match(3, "Real-Barca", "OV 2.5", "1.85", "20.0", "4.1")
 
 st.markdown('</div>', unsafe_allow_html=True)

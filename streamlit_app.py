@@ -6,12 +6,12 @@ from datetime import datetime, timedelta, date
 from streamlit_gsheets import GSheetsConnection
 
 # --- CONFIGURAZIONE UI ---
-st.set_page_config(page_title="AI SNIPER V14.0 - MOBILE OPTIMIZED", layout="wide")
+st.set_page_config(page_title="AI SNIPER V14.1 - STABLE FULL", layout="wide")
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 API_KEY = '01f1c8f2a314814b17de03eeb6c53623'
 
-# Costanti Obiettivo
+# Costanti Obiettivo e Budget (Basate sulle tue preferenze salvate)
 BUDGET_DISPONIBILE = 500.0
 OBIETTIVO_TARGET = 5000.0
 
@@ -30,7 +30,7 @@ LEAGUE_NAMES = {
     "soccer_uefa_champions_league": "🏆 Champions"
 }
 
-# --- FUNZIONI CORE ---
+# --- FUNZIONI CORE DATABASE ---
 def carica_db():
     try:
         df = conn.read(worksheet="Giocate", ttl=0)
@@ -53,7 +53,7 @@ def chiudi_manualmente(idx, esito):
         st.rerun()
 
 # --- INTERFACCIA ---
-st.title("🎯 AI SNIPER V14.0")
+st.title("🎯 AI SNIPER V14.1")
 df_attuale = carica_db()
 
 with st.sidebar:
@@ -133,69 +133,91 @@ with t1:
                         st.divider()
             except: continue
 
-# --- TAB 2: PORTAFOGLIO (Mobile Optimized) ---
+# --- TAB 2: PORTAFOGLIO (Compact Row Design) ---
 with t2:
     df_p = df_attuale[df_attuale['Esito'] == "Pendente"]
     if not df_p.empty:
         tot_imp = round(df_p['Stake'].astype(float).sum(), 2)
         rit_pot = round((df_p['Stake'].astype(float) * df_p['Quota'].astype(float)).sum(), 2)
+        
         st.markdown(f"""
-            <div style='background:#1c2128; padding:15px; border-radius:10px; display:flex; justify-content:space-around; text-align:center; margin-bottom:20px;'>
-                <div><small style='color:white;'>IMPEGNATO</small><br><strong style='color:#ffc107; font-size:20px;'>{tot_imp}€</strong></div>
-                <div style='border-left:1px solid #333; padding-left:20px;'><small style='color:white;'>RITORNO POT.</small><br><strong style='color:#00ff00; font-size:20px;'>{rit_pot}€</strong></div>
+            <div style='background:#1c2128; padding:10px; border-radius:8px; display:flex; justify-content:space-around; text-align:center; margin-bottom:15px; border:1px solid #333;'>
+                <div style='color:white;'><small>IMPEGNATO</small><br><b style='color:#ffc107; font-size:18px;'>{tot_imp}€</b></div>
+                <div style='color:white; border-left:1px solid #444; padding-left:20px;'><small>RITORNO TOT.</small><br><b style='color:#00ff00; font-size:18px;'>{rit_pot}€</b></div>
             </div>
         """, unsafe_allow_html=True)
-        
+
         for i, r in df_p.iterrows():
-            nome_camp = LEAGUE_NAMES.get(r['Sport_Key'], "⚽ Campionato")
-            with st.container(border=True):
-                st.markdown(f"**{nome_camp}**")
-                st.markdown(f"📅 {r['Data Match']} | **{r['Match']}**")
-                st.markdown(f"🎯 {r['Scelta']} @{r['Quota']} | 🏦 {r['Bookmaker']}")
-                st.markdown(f"💰 Stake: **{r['Stake']}€**")
+            camp = LEAGUE_NAMES.get(r['Sport_Key'], "⚽")
+            # Label riga unica compatta
+            label_riga = f"{camp} | {r['Match']} | @{r['Quota']} | {r['Stake']}€"
+            
+            with st.expander(label_riga):
+                st.markdown(f"**Dettaglio Operazione** 🏦 *{r['Bookmaker']}*")
+                c_inf1, c_inf2 = st.columns(2)
+                c_inf1.write(f"📅 Inizio: {r['Data Match']}")
+                c_inf1.write(f"🎯 Mercato: **{r['Scelta']}**")
+                c_inf2.write(f"💰 Puntata: {r['Stake']}€")
+                c_inf2.write(f"🟢 Possibile Vincita: {round(float(r['Stake'])*float(r['Quota']),2)}€")
                 
-                # Riga pulsanti integrata nella card
-                bw1, bw2, bw3 = st.columns(3)
-                if bw1.button("VINTO ✅", key=f"w_{i}", use_container_width=True): chiudi_manualmente(i, "VINTO")
-                if bw2.button("PERSO ❌", key=f"l_{i}", use_container_width=True): chiudi_manualmente(i, "PERSO")
-                if bw3.button("ELIMINA 🗑️", key=f"d_{i}", use_container_width=True): 
+                st.divider()
+                b1, b2, b3 = st.columns(3)
+                if b1.button("VINTO ✅", key=f"w_{i}", use_container_width=True): chiudi_manualmente(i, "VINTO")
+                if b2.button("PERSO ❌", key=f"l_{i}", use_container_width=True): chiudi_manualmente(i, "PERSO")
+                if b3.button("ELIMINA 🗑️", key=f"d_{i}", use_container_width=True): 
                     salva_db(df_attuale.drop(i)); st.rerun()
-    else: st.info("Nessuna giocata pendente.")
+    else:
+        st.info("Nessuna operazione pendente. Avvia una scansione per iniziare.")
 
 # --- TAB 3: FISCALE ---
 with t3:
     if not df_attuale.empty:
         df_vis = df_attuale.copy()
         df_vis['Campionato'] = df_vis['Sport_Key'].map(LEAGUE_NAMES).fillna("Altro")
-        v_df = df_vis[df_vis['Esito'] == "VINTO"]; p_df = df_vis[df_vis['Esito'] == "PERSO"]
+        v_df = df_vis[df_vis['Esito'] == "VINTO"]
+        p_df = df_vis[df_vis['Esito'] == "PERSO"]
+        
         profitto_netto = round(df_vis['Profitto'].sum(), 2)
         win_rate = round((len(v_df) / (len(v_df) + len(p_df)) * 100), 1) if (len(v_df) + len(p_df)) > 0 else 0
         
         m1, m2, m3, m4 = st.columns(4)
-        m1.metric("📈 Netto", f"{profitto_netto} €")
+        m1.metric("📈 Profitto Netto", f"{profitto_netto} €")
         m2.metric("🎯 Win Rate", f"{win_rate} %")
-        m3.metric("💵 Giocato", f"{round(df_vis['Stake'].sum(), 2)} €")
-        m4.metric("📊 Match", len(v_df) + len(p_df))
+        m3.metric("💵 Giocato Tot.", f"{round(df_vis['Stake'].sum(), 2)} €")
+        m4.metric("📊 Match Chiusi", len(v_df) + len(p_df))
         
-        # Simulatore Scalata
-        st.write(f"### 🚀 Obiettivo {OBIETTIVO_TARGET}€")
+        # Simulatore Scalata 5000€
+        st.write(f"### 🚀 Obiettivo Scalata: {OBIETTIVO_TARGET}€")
         progresso = min(1.0, max(0.0, profitto_netto / OBIETTIVO_TARGET)) if profitto_netto > 0 else 0.0
         st.progress(progresso)
+        
+        col_p1, col_p2 = st.columns([1, 1])
+        col_p1.caption(f"Completato: {int(progresso*100)}%")
+        
         if (len(v_df) + len(p_df)) > 5 and profitto_netto > 0:
-            match_m = int((OBIETTIVO_TARGET - profitto_netto) / (profitto_netto / (len(v_df) + len(p_df))))
-            st.success(f"Mancano circa **{match_m} match** alla vetta.")
+            profitto_per_match = profitto_netto / (len(v_df) + len(p_df))
+            match_mancanti = int((OBIETTIVO_TARGET - profitto_netto) / profitto_per_match)
+            col_p2.markdown(f"<p style='text-align:right;color:#00ff00;'><b>Mancano circa {match_mancanti} match</b></p>", unsafe_allow_html=True)
+        else:
+            col_p2.markdown("<p style='text-align:right;'>Dati insufficienti per predizione</p>", unsafe_allow_html=True)
         
         st.divider()
         c_exp, c_imp = st.columns(2)
         with c_exp:
-            st.download_button("📥 BACKUP", data=df_attuale.to_csv(index=False).encode('utf-8'), file_name=f"sniper_v14_{date.today()}.csv", use_container_width=True)
+            st.download_button("📥 SCARICA BACKUP", data=df_attuale.to_csv(index=False).encode('utf-8'), file_name=f"sniper_v14_1_{date.today()}.csv", use_container_width=True)
         with c_imp:
-            up = st.file_uploader("Restore", type="csv")
-            if up and st.button("🔄 CARICA"): salva_db(pd.read_csv(up)); st.rerun()
+            up = st.file_uploader("Ripristina database", type="csv")
+            if up and st.button("🔄 CARICA CSV"):
+                salva_db(pd.read_csv(up)); st.rerun()
         
         st.divider()
         def color_esito(row):
             if row['Esito'] == "VINTO": return ['background-color: rgba(40, 167, 69, 0.2)'] * len(row)
             if row['Esito'] == "PERSO": return ['background-color: rgba(220, 53, 69, 0.2)'] * len(row)
             return ['background-color: rgba(255, 193, 7, 0.2)'] * len(row)
-        st.dataframe(df_vis.sort_index(ascending=False).style.apply(color_esito, axis=1), use_container_width=True)
+
+        st.write("### Storico Operazioni Chiusure")
+        cols_ordine = ["Data Match", "Campionato", "Match", "Scelta", "Quota", "Stake", "Esito", "Profitto", "Risultato", "Bookmaker"]
+        st.dataframe(df_vis[cols_ordine].sort_index(ascending=False).style.apply(color_esito, axis=1), use_container_width=True)
+    else:
+        st.info("Database vuoto. Registra la tua prima giocata per vedere le statistiche.")

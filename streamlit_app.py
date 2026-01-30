@@ -135,12 +135,17 @@ with t2:
     if not df_p.empty:
         tot_imp = round(df_p['Stake'].astype(float).sum(), 2)
         rit_pot = round((df_p['Stake'].astype(float) * df_p['Quota'].astype(float)).sum(), 2)
-        st.markdown(f"<div style='background:#1c2128;padding:15px;border-radius:10px;display:flex;justify-content:space-around;text-align:center;'><div><small>IMPEGNATO</small><br><strong style='color:#ffc107;font-size:20px;'>{tot_imp}€</strong></div><div style='border-left:1px solid #333;padding-left:20px;'><small>RITORNO POT.</small><br><strong style='color:#00ff00;font-size:20px;'>{rit_pot}€</strong></div></div>", unsafe_allow_html=True)
+        # Fix Colore Testo Bianco
+        st.markdown(f"""
+            <div style='background:#1c2128; padding:15px; border-radius:10px; display:flex; justify-content:space-around; text-align:center;'>
+                <div><small style='color:white;'>IMPEGNATO</small><br><strong style='color:#ffc107; font-size:20px;'>{tot_imp}€</strong></div>
+                <div style='border-left:1px solid #333; padding-left:20px;'><small style='color:white;'>RITORNO POT.</small><br><strong style='color:#00ff00; font-size:20px;'>{rit_pot}€</strong></div>
+            </div>
+        """, unsafe_allow_html=True)
         st.divider()
         for i, r in df_p.iterrows():
             nome_camp = LEAGUE_NAMES.get(r['Sport_Key'], "Campionato")
             c1, c2, c3, c4 = st.columns([12, 1.2, 1.2, 1.2])
-            # Visualizzazione con Campionato
             c1.info(f"📅 **{r['Data Match']}** | **{nome_camp}**\n\n**{r['Match']}** | {r['Scelta']} @{r['Quota']} | Stake: **{r['Stake']}€** | 🏦 {r['Bookmaker']}")
             if c2.button("✅", key=f"w_{i}"): chiudi_manualmente(i, "VINTO")
             if c3.button("❌", key=f"l_{i}"): chiudi_manualmente(i, "PERSO")
@@ -150,10 +155,8 @@ with t2:
 # --- TAB 3: FISCALE ---
 with t3:
     if not df_attuale.empty:
-        # Aggiungiamo una colonna temporanea per la visualizzazione del campionato nella tabella
         df_vis = df_attuale.copy()
         df_vis['Campionato'] = df_vis['Sport_Key'].map(LEAGUE_NAMES).fillna("Altro")
-        
         v_df = df_vis[df_vis['Esito'] == "VINTO"]
         p_df = df_vis[df_vis['Esito'] == "PERSO"]
         win_rate = round((len(v_df) / (len(v_df) + len(p_df)) * 100), 1) if (len(v_df) + len(p_df)) > 0 else 0
@@ -181,8 +184,5 @@ with t3:
             return ['background-color: rgba(255, 193, 7, 0.2)'] * len(row)
 
         st.write("### Storico Operazioni")
-        # Ordine colonne tabella: Campionato aggiunto all'inizio
         cols_ordine = ["Data Match", "Campionato", "Match", "Scelta", "Quota", "Stake", "Esito", "Profitto", "Risultato", "Bookmaker"]
         st.dataframe(df_vis[cols_ordine].sort_index(ascending=False).style.apply(color_esito, axis=1), use_container_width=True)
-    else:
-        st.info("Database vuoto.")

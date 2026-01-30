@@ -64,15 +64,13 @@ with st.sidebar:
 
 t1, t2, t3 = st.tabs(["🔍 SCANNER", "💼 PORTAFOGLIO", "📊 FISCALE"])
 
-# --- TAB 1: SCANNER (Con Singola e Totale) ---
+# --- TAB 1: SCANNER ---
 with t1:
     leagues = {v: k for k, v in LEAGUE_NAMES.items()}
     c_sel, c_all, c_sing, c_ore = st.columns([1.5, 1, 1, 1])
-    
     sel_name = c_sel.selectbox("Seleziona Campionato:", list(leagues.keys()))
     ore_limite = c_ore.selectbox("Finestra Ore:", [24, 48, 72, 96, 120, 168], index=2)
     
-    # PULSANTE TOTALE
     if c_all.button("🚀 TOTALE", use_container_width=True):
         all_found = []
         keys_to_scan = list(LEAGUE_NAMES.keys())
@@ -90,7 +88,6 @@ with t1:
         st.session_state['api_data'] = all_found
         st.rerun()
 
-    # PULSANTE SINGOLA (RIPRISTINATO)
     if c_sing.button("🔍 SINGOLA", use_container_width=True):
         target_key = leagues[sel_name]
         res = requests.get(f'https://api.the-odds-api.com/v4/sports/{target_key}/odds/', params={'api_key': API_KEY, 'regions': 'eu', 'markets': 'totals'})
@@ -101,7 +98,6 @@ with t1:
             st.session_state['api_usage']['remaining'] = res.headers.get('x-requests-remaining')
             st.rerun()
 
-    # Visualizzazione risultati (Card e Smart Button)
     if st.session_state['api_data']:
         pend_list = df_attuale[df_attuale['Esito'] == "Pendente"]['Match'].tolist()
         for i, m in enumerate(st.session_state['api_data']):
@@ -135,27 +131,56 @@ with t1:
 
 # --- TAB 2: PORTAFOGLIO ---
 with t2:
-    # (Logica Portafoglio con tasti ✅ ❌ 🗑️ come sopra)
     df_p = df_attuale[df_attuale['Esito'] == "Pendente"]
     if not df_p.empty:
+        tot_imp = round(df_p['Stake'].astype(float).sum(), 2)
+        rit_pot = round((df_p['Stake'].astype(float) * df_p['Quota'].astype(float)).sum(), 2)
+        st.markdown(f"<div style='background:#1c2128;padding:15px;border-radius:10px;display:flex;justify-content:space-around;text-align:center;'><div><small>IMPEGNATO</small><br><strong style='color:#ffc107;font-size:20px;'>{tot_imp}€</strong></div><div style='border-left:1px solid #333;padding-left:20px;'><small>RITORNO POT.</small><br><strong style='color:#00ff00;font-size:20px;'>{rit_pot}€</strong></div></div>", unsafe_allow_html=True)
+        st.divider()
         for i, r in df_p.iterrows():
             c1, c2, c3, c4 = st.columns([12, 1.2, 1.2, 1.2])
-            c1.info(f"📅 **{r['Data Match']}** | **{r['Match']}**\n\n{r['Scelta']} @{r['Quota']} | Stake: **{r['Stake']}€**")
-            if c2.button("✅", key=f"pw_{i}"): chiudi_manualmente(i, "VINTO")
-            if c3.button("❌", key=f"pl_{i}"): chiudi_manualmente(i, "PERSO")
-            if c4.button("🗑️", key=f"pd_{i}"): salva_db(df_attuale.drop(i)); st.rerun()
+            c1.info(f"📅 **{r['Data Match']}** | **{r['Match']}**\n\n{r['Scelta']} @{r['Quota']} | Stake: **{r['Stake']}€** | 🏦 {r['Bookmaker']}")
+            if c2.button("✅", key=f"w_{i}", help="Vinta"): chiudi_manualmente(i, "VINTO")
+            if c3.button("❌", key=f"l_{i}", help="Persa"): chiudi_manualmente(i, "PERSO")
+            if c4.button("🗑️", key=f"d_{i}", help="Elimina"): salva_db(df_attuale.drop(i)); st.rerun()
+    else: st.info("Nessuna giocata pendente.")
 
-# --- TAB 3: FISCALE ---
+# --- TAB 3: FISCALE (STATISTICHE + BACKUP + COLORI) ---
 with t3:
-    # (Logica Fiscale con Colori e Backup come sopra)
     if not df_attuale.empty:
-        st.metric("📈 Profitto Netto", f"{round(df_attuale['Profitto'].sum(), 2)} €")
-        csv = df_attuale.to_csv(index=False).encode('utf-8')
-        st.download_button("📥 SCARICA BACKUP CSV", data=csv, file_name="backup.csv", use_container_width=True)
+        # Metriche Statistiche
+        v_df = df_attuale[df_attuale['Esito'] == "VINTO"]
+        p_df = df_attuale[df_attuale['Esito'] == "PERSO"]
+        win_rate = round((len(v_df) / (len(v_df) + len(p_df)) * 100), 1) if (len(v_df) + len(p_df)) > 0 else 0
+        profitto_tot = round(df_attuale['Profitto'].sum(), 2)
         
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("📈 Profitto Netto", f"{profitto_tot} €")
+        m2.metric("🎯 Win Rate", f"{win_rate} %")
+        m3.metric("💰 Tot. Giocato", f"{round(df_attuale['Stake'].sum(), 2)} €")
+        m4.metric("📊 Match Chiusi", len(v_df) + len(p_df))
+        
+        st.divider()
+        
+        # Area Backup
+        c_exp, c_imp = st.columns(2)
+        with c_exp:
+            csv = df_attuale.to_csv(index=False).encode('utf-8')
+            st.download_button("📥 SCARICA CSV", data=csv, file_name=f"sniper_backup_{date.today()}.csv", use_container_width=True)
+        with c_imp:
+            up = st.file_uploader("Carica Backup", type="csv")
+            if up and st.button("🔄 RIPRISTINA", use_container_width=True):
+                salva_db(pd.read_csv(up)); st.rerun()
+        
+        st.divider()
+        
+        # Tabella con Colori Smart
         def color_esito(row):
             if row['Esito'] == "VINTO": return ['background-color: rgba(40, 167, 69, 0.2)'] * len(row)
             if row['Esito'] == "PERSO": return ['background-color: rgba(220, 53, 69, 0.2)'] * len(row)
             return ['background-color: rgba(255, 193, 7, 0.2)'] * len(row)
 
+        st.write("### Storico Operazioni")
         st.dataframe(df_attuale.sort_index(ascending=False).style.apply(color_esito, axis=1), use_container_width=True)
+    else:
+        st.info("Nessun dato presente nel Fiscale.")

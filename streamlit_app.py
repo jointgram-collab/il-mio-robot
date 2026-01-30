@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, date
 from streamlit_gsheets import GSheetsConnection
 
 # --- CONFIGURAZIONE UI ---
-st.set_page_config(page_title="AI SNIPER V13.9 - PREDICTIVE", layout="wide")
+st.set_page_config(page_title="AI SNIPER V14.0 - MOBILE OPTIMIZED", layout="wide")
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 API_KEY = '01f1c8f2a314814b17de03eeb6c53623'
@@ -53,7 +53,7 @@ def chiudi_manualmente(idx, esito):
         st.rerun()
 
 # --- INTERFACCIA ---
-st.title("🎯 AI SNIPER V13.9")
+st.title("🎯 AI SNIPER V14.0")
 df_attuale = carica_db()
 
 with st.sidebar:
@@ -133,65 +133,62 @@ with t1:
                         st.divider()
             except: continue
 
-# --- TAB 2: PORTAFOGLIO ---
+# --- TAB 2: PORTAFOGLIO (Mobile Optimized) ---
 with t2:
     df_p = df_attuale[df_attuale['Esito'] == "Pendente"]
     if not df_p.empty:
         tot_imp = round(df_p['Stake'].astype(float).sum(), 2)
         rit_pot = round((df_p['Stake'].astype(float) * df_p['Quota'].astype(float)).sum(), 2)
         st.markdown(f"""
-            <div style='background:#1c2128; padding:15px; border-radius:10px; display:flex; justify-content:space-around; text-align:center;'>
+            <div style='background:#1c2128; padding:15px; border-radius:10px; display:flex; justify-content:space-around; text-align:center; margin-bottom:20px;'>
                 <div><small style='color:white;'>IMPEGNATO</small><br><strong style='color:#ffc107; font-size:20px;'>{tot_imp}€</strong></div>
                 <div style='border-left:1px solid #333; padding-left:20px;'><small style='color:white;'>RITORNO POT.</small><br><strong style='color:#00ff00; font-size:20px;'>{rit_pot}€</strong></div>
             </div>
         """, unsafe_allow_html=True)
-        st.divider()
+        
         for i, r in df_p.iterrows():
-            nome_camp = LEAGUE_NAMES.get(r['Sport_Key'], "Campionato")
-            c1, c2, c3, c4 = st.columns([12, 1.2, 1.2, 1.2])
-            c1.info(f"📅 **{r['Data Match']}** | **{nome_camp}**\n\n**{r['Match']}** | {r['Scelta']} @{r['Quota']} | Stake: **{r['Stake']}€** | 🏦 {r['Bookmaker']}")
-            if c2.button("✅", key=f"w_{i}"): chiudi_manualmente(i, "VINTO")
-            if c3.button("❌", key=f"l_{i}"): chiudi_manualmente(i, "PERSO")
-            if c4.button("🗑️", key=f"d_{i}"): salva_db(df_attuale.drop(i)); st.rerun()
+            nome_camp = LEAGUE_NAMES.get(r['Sport_Key'], "⚽ Campionato")
+            with st.container(border=True):
+                st.markdown(f"**{nome_camp}**")
+                st.markdown(f"📅 {r['Data Match']} | **{r['Match']}**")
+                st.markdown(f"🎯 {r['Scelta']} @{r['Quota']} | 🏦 {r['Bookmaker']}")
+                st.markdown(f"💰 Stake: **{r['Stake']}€**")
+                
+                # Riga pulsanti integrata nella card
+                bw1, bw2, bw3 = st.columns(3)
+                if bw1.button("VINTO ✅", key=f"w_{i}", use_container_width=True): chiudi_manualmente(i, "VINTO")
+                if bw2.button("PERSO ❌", key=f"l_{i}", use_container_width=True): chiudi_manualmente(i, "PERSO")
+                if bw3.button("ELIMINA 🗑️", key=f"d_{i}", use_container_width=True): 
+                    salva_db(df_attuale.drop(i)); st.rerun()
     else: st.info("Nessuna giocata pendente.")
 
-# --- TAB 3: FISCALE (Update Simulatore) ---
+# --- TAB 3: FISCALE ---
 with t3:
     if not df_attuale.empty:
         df_vis = df_attuale.copy()
         df_vis['Campionato'] = df_vis['Sport_Key'].map(LEAGUE_NAMES).fillna("Altro")
         v_df = df_vis[df_vis['Esito'] == "VINTO"]; p_df = df_vis[df_vis['Esito'] == "PERSO"]
-        
         profitto_netto = round(df_vis['Profitto'].sum(), 2)
         win_rate = round((len(v_df) / (len(v_df) + len(p_df)) * 100), 1) if (len(v_df) + len(p_df)) > 0 else 0
         
         m1, m2, m3, m4 = st.columns(4)
-        m1.metric("📈 Profitto Netto", f"{profitto_netto} €")
+        m1.metric("📈 Netto", f"{profitto_netto} €")
         m2.metric("🎯 Win Rate", f"{win_rate} %")
         m3.metric("💵 Giocato", f"{round(df_vis['Stake'].sum(), 2)} €")
-        m4.metric("📊 Match Chiusi", len(v_df) + len(p_df))
+        m4.metric("📊 Match", len(v_df) + len(p_df))
         
-        # --- SIMULATORE PREDIZIONE ---
-        st.write("### 🔮 Analisi Predittiva Scalata")
+        # Simulatore Scalata
+        st.write(f"### 🚀 Obiettivo {OBIETTIVO_TARGET}€")
         progresso = min(1.0, max(0.0, profitto_netto / OBIETTIVO_TARGET)) if profitto_netto > 0 else 0.0
         st.progress(progresso)
-        
-        num_match = len(v_df) + len(p_df)
-        if num_match > 5:
-            profitto_medio = profitto_netto / num_match
-            if profitto_medio > 0:
-                match_mancanti = int((OBIETTIVO_TARGET - profitto_netto) / profitto_medio)
-                st.success(f"Basandosi sulle tue performance, mancano circa **{match_mancanti} match** per raggiungere i 5000€.")
-            else:
-                st.warning("Il profitto medio attuale è negativo. Mantieni la strategia Value per invertire il trend.")
-        else:
-            st.info("Servono almeno 5 match chiusi per generare una predizione statistica affidabile.")
+        if (len(v_df) + len(p_df)) > 5 and profitto_netto > 0:
+            match_m = int((OBIETTIVO_TARGET - profitto_netto) / (profitto_netto / (len(v_df) + len(p_df))))
+            st.success(f"Mancano circa **{match_m} match** alla vetta.")
         
         st.divider()
         c_exp, c_imp = st.columns(2)
         with c_exp:
-            csv = df_attuale.to_csv(index=False).encode('utf-8')
-            st.download_button("📥 BACKUP CSV", data=csv, file_name=f"sniper_v13.9_{date.today()}.csv", use_container_width=True)
+            st.download_button("📥 BACKUP", data=df_attuale.to_csv(index=False).encode('utf-8'), file_name=f"sniper_v14_{date.today()}.csv", use_container_width=True)
         with c_imp:
             up = st.file_uploader("Restore", type="csv")
             if up and st.button("🔄 CARICA"): salva_db(pd.read_csv(up)); st.rerun()

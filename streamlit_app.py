@@ -6,15 +6,15 @@ from datetime import datetime, timedelta, date
 from streamlit_gsheets import GSheetsConnection
 
 # --- CONFIGURAZIONE UI ---
-st.set_page_config(page_title="AI SNIPER V14.4 - DEBUG MODE", layout="wide")
+st.set_page_config(page_title="AI SNIPER V14.2 - FULL STABLE", layout="wide")
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 API_KEY = '01f1c8f2a314814b17de03eeb6c53623'
 
+# Costanti Obiettivo e Budget
 BUDGET_DISPONIBILE = 500.0
 OBIETTIVO_TARGET = 5000.0
 
-# Inizializzazione Session State
 if 'api_usage' not in st.session_state:
     st.session_state['api_usage'] = {'remaining': "N/D", 'used': "N/D"}
 if 'api_data' not in st.session_state:
@@ -30,19 +30,12 @@ LEAGUE_NAMES = {
     "soccer_uefa_champions_league": "🏆 Champions"
 }
 
-# --- FUNZIONI CORE ---
-def aggiorna_api_stats(headers):
-    rem = headers.get('x-requests-remaining')
-    used = headers.get('x-requests-used')
-    if rem is not None: st.session_state['api_usage']['remaining'] = rem
-    if used is not None: st.session_state['api_usage']['used'] = used
-
+# --- FUNZIONI CORE DATABASE ---
 def carica_db():
     try:
         df = conn.read(worksheet="Giocate", ttl=0)
         return df.dropna(subset=["Match"]) if df is not None else pd.DataFrame(columns=["Data Match", "Match", "Scelta", "Quota", "Stake", "Bookmaker", "Esito", "Profitto", "Sport_Key", "Risultato"])
-    except Exception as e:
-        st.error(f"Errore caricamento DB: {e}")
+    except:
         return pd.DataFrame(columns=["Data Match", "Match", "Scelta", "Quota", "Stake", "Bookmaker", "Esito", "Profitto", "Sport_Key", "Risultato"])
 
 def salva_db(df):
@@ -60,7 +53,7 @@ def chiudi_manualmente(idx, esito, risultato_score="-"):
         st.rerun()
 
 # --- INTERFACCIA ---
-st.title("🎯 AI SNIPER V14.4")
+st.title("🎯 AI SNIPER V14.2")
 df_attuale = carica_db()
 
 with st.sidebar:
@@ -72,7 +65,6 @@ with st.sidebar:
     budget_cassa = st.number_input("Cassa Operativa (€)", value=BUDGET_DISPONIBILE)
     rischio = st.slider("Aggressività (Kelly)", 0.05, 0.50, 0.15)
     soglia_val = st.slider("Filtro Valore Min %", 0, 15, 3) / 100
-    debug_mode = st.checkbox("🐞 Attiva Debug Mode")
 
 t1, t2, t3 = st.tabs(["🔍 SCANNER", "💼 PORTAFOGLIO", "📊 FISCALE"])
 
@@ -85,100 +77,152 @@ with t1:
     
     if c_all.button("🚀 SCAN TOTALE", use_container_width=True):
         all_found = []
+        keys_to_scan = list(LEAGUE_NAMES.keys())
         pbar = st.progress(0)
-        for idx, k in enumerate(LEAGUE_NAMES.keys()):
+        limit_date = datetime.utcnow() + timedelta(hours=ore_limite)
+        for idx, k in enumerate(keys_to_scan):
             r = requests.get(f'https://api.the-odds-api.com/v4/sports/{k}/odds/', params={'api_key': API_KEY, 'regions': 'eu', 'markets': 'totals'})
             if r.status_code == 200:
-                aggiorna_api_stats(r.headers)
-                all_found.extend(r.json())
-            elif debug_mode: st.warning(f"Errore su {k}: {r.status_code}")
-            time.sleep(0.3)
-            pbar.progress((idx + 1) / len(LEAGUE_NAMES))
+                data = r.json()
+                filtered = [m for m in data if datetime.strptime(m['commence_time'], "%Y-%m-%dT%H:%M:%SZ") <= limit_date]
+                all_found.extend(filtered)
+                st.session_state['api_usage']['remaining'] = r.headers.get('x-requests-remaining')
+            time.sleep(0.4)
+            pbar.progress((idx + 1) / len(keys_to_scan))
         st.session_state['api_data'] = all_found
         st.rerun()
 
     if c_sing.button("🔍 SCAN SINGOLO", use_container_width=True):
-        res = requests.get(f'https://api.the-odds-api.com/v4/sports/{leagues[sel_name]}/odds/', params={'api_key': API_KEY, 'regions': 'eu', 'markets': 'totals'})
+        target_key = leagues[sel_name]
+        res = requests.get(f'https://api.the-odds-api.com/v4/sports/{target_key}/odds/', params={'api_key': API_KEY, 'regions': 'eu', 'markets': 'totals'})
         if res.status_code == 200:
-            aggiorna_api_stats(res.headers)
-            st.session_state['api_data'] = res.json()
-            if not res.json() and debug_mode: st.info("L'API ha risposto correttamente ma non ci sono match disponibili.")
-        else:
-            st.error(f"Errore API {res.status_code}: {res.text}")
-        st.rerun()
+            data = res.json()
+            limit_date = datetime.utcnow() + timedelta(hours=ore_limite)
+            st.session_state['api_data'] = [m for m in data if datetime.strptime(m['commence_time'], "%Y-%m-%dT%H:%M:%SZ") <= limit_date]
+            st.session_state['api_usage']['remaining'] = res.headers.get('x-requests-remaining')
+            st.rerun()
 
     if st.session_state['api_data']:
         pend_list = df_attuale[df_attuale['Esito'] == "Pendente"]['Match'].tolist()
-        matches_visualizzati = 0
-        
         for i, m in enumerate(st.session_state['api_data']):
             try:
                 nome_m = f"{m['home_team']}-{m['away_team']}"
                 dt_m = datetime.strptime(m['commence_time'], "%Y-%m-%dT%H:%M:%SZ").strftime("%d/%m %H:%M")
-                
-                # Check Window Ore
-                dt_obj = datetime.strptime(m['commence_time'], "%Y-%m-%dT%H:%M:%SZ")
-                if dt_obj > datetime.utcnow() + timedelta(hours=ore_limite): continue
-
                 opts = []
                 for b in m.get('bookmakers', []):
                     if b['title'] in BK_EURO_AUTH:
                         mk = next((x for x in b['markets'] if x['key'] == 'totals'), None)
                         if mk:
-                            for o in mk['outcomes']:
-                                if o.get('point') == 2.5:
-                                    q = o['price']
-                                    val = ((1/q + 0.06) * q) - 1
-                                    opts.append({"T": f"{o['name'].upper()} 2.5", "Q": q, "V": val, "BK": b['title']})
-                
+                            q_ov = next((o['price'] for o in mk['outcomes'] if o['name'] == 'Over' and float(o.get('point',0)) == 2.5), None)
+                            q_un = next((o['price'] for o in mk['outcomes'] if o['name'] == 'Under' and float(o.get('point',0)) == 2.5), None)
+                            if q_ov: opts.append({"T": "OVER 2.5", "Q": q_ov, "P": (1/q_ov)+0.06, "BK": b['title']})
+                            if q_un: opts.append({"T": "UNDER 2.5", "Q": q_un, "P": (1/q_un)+0.06, "BK": b['title']})
                 if opts:
-                    best = max(opts, key=lambda x: x['V'])
-                    if best['V'] >= soglia_val:
-                        matches_visualizzati += 1
-                        stk = round(max(2.0, min(budget_cassa * (best['V']/(best['Q']-1)) * rischio, budget_cassa*0.15)), 2)
+                    best = max(opts, key=lambda x: (x['P'] * x['Q']) - 1)
+                    val = (best['P'] * best['Q']) - 1
+                    if val >= soglia_val:
+                        stk_c = round(max(2.0, min(budget_cassa * (val/(best['Q']-1)) * rischio, budget_cassa*0.15)), 2)
                         c_a, c_b = st.columns([3, 1])
-                        c_a.markdown(f"📅 {dt_m} | **{nome_m}**<br>🎯 **{best['T']}** @{best['Q']} (Val: {round(best['V']*100,1)}%) | 🏦 {best['BK']}", unsafe_allow_html=True)
+                        c_a.markdown(f"📅 {dt_m} | **{nome_m}**<br>🎯 **{best['T']}** @{best['Q']} | Stake: **{stk_c}€** | 🏦 {best['BK']}", unsafe_allow_html=True)
                         if nome_m in pend_list:
                             c_b.button("✅", key=f"add_{i}", disabled=True, use_container_width=True)
-                        elif c_b.button("ADD", key=f"add_{i}", use_container_width=True):
-                            nuova = pd.DataFrame([{"Data Match": dt_m, "Match": nome_m, "Scelta": best['T'], "Quota": best['Q'], "Stake": stk, "Bookmaker": best['BK'], "Esito": "Pendente", "Profitto": 0.0, "Sport_Key": m['sport_key'], "Risultato": "-"}])
-                            salva_db(pd.concat([df_attuale, nuova], ignore_index=True)); st.rerun()
+                        else:
+                            if c_b.button(f"ADD", key=f"add_{i}", use_container_width=True):
+                                nuova = pd.DataFrame([{"Data Match": dt_m, "Match": nome_m, "Scelta": best['T'], "Quota": best['Q'], "Stake": stk_c, "Bookmaker": best['BK'], "Esito": "Pendente", "Profitto": 0.0, "Sport_Key": m['sport_key'], "Risultato": "-"}])
+                                salva_db(pd.concat([df_attuale, nuova], ignore_index=True)); st.rerun()
                         st.divider()
-            except Exception as e:
-                if debug_mode: st.error(f"Errore parsing match {i}: {e}")
+            except: continue
 
-        if matches_visualizzati == 0:
-            st.warning("Nessun match trovato con i filtri attuali. Prova a ridurre 'Filtro Valore Min %' o aumentare la 'Window Ore'.")
-
-# --- TAB 2: PORTAFOGLIO ---
+# --- TAB 2: PORTAFOGLIO (AUTO-CHECK + EXPANDER) ---
 with t2:
     df_p = df_attuale[df_attuale['Esito'] == "Pendente"]
     
-    if st.button("🤖 AUTO-CHECK RISULTATI", use_container_width=True, type="primary"):
-        with st.spinner("Controllando esiti..."):
-            for idx, row in df_p.iterrows():
-                res = requests.get(f"https://api.the-odds-api.com/v4/sports/{row['Sport_Key']}/scores/", params={'api_key': API_KEY, 'daysFrom': 3})
-                if res.status_code == 200:
-                    aggiorna_api_stats(res.headers)
-                    match_data = next((s for s in res.json() if s['home_team'] in row['Match'] and s['completed']), None)
-                    if match_data:
-                        h = int(match_data['scores'][0]['score'])
-                        a = int(match_data['scores'][1]['score'])
-                        vinto = (row['Scelta'] == "OVER 2.5" and (h+a) > 2.5) or (row['Scelta'] == "UNDER 2.5" and (h+a) < 2.5)
-                        chiudi_manualmente(idx, "VINTO" if vinto else "PERSO", f"{h}-{a}")
-        st.rerun()
+    col_a, col_b = st.columns([2, 1])
+    with col_a:
+        if st.button("🤖 AUTO-CHECK RISULTATI", use_container_width=True, type="primary"):
+            with st.spinner("Interrogazione API Risultati..."):
+                for idx, row in df_p.iterrows():
+                    res = requests.get(f"https://api.the-odds-api.com/v4/sports/{row['Sport_Key']}/scores/", params={'api_key': API_KEY, 'daysFrom': 3})
+                    if res.status_code == 200:
+                        scores = res.json()
+                        match_data = next((s for s in scores if s['home_team'] in row['Match'] and s['away_team'] in row['Match'] and s['completed']), None)
+                        if match_data:
+                            h_score = int(match_data['scores'][0]['score'])
+                            a_score = int(match_data['scores'][1]['score'])
+                            tot_gol = h_score + a_score
+                            final_s = f"{h_score}-{a_score}"
+                            
+                            esito_finale = "VINTO" if (row['Scelta'] == "OVER 2.5" and tot_gol > 2.5) or (row['Scelta'] == "UNDER 2.5" and tot_gol < 2.5) else "PERSO"
+                            chiudi_manualmente(idx, esito_finale, final_s)
+            st.rerun()
 
-    for i, r in df_p.iterrows():
-        with st.expander(f"{r['Match']} | @{r['Quota']} | {r['Stake']}€"):
-            b1, b2, b3 = st.columns(3)
-            if b1.button("VINTO ✅", key=f"w_{i}", use_container_width=True): chiudi_manualmente(i, "VINTO", "MAN")
-            if b2.button("PERSO ❌", key=f"l_{i}", use_container_width=True): chiudi_manualmente(i, "PERSO", "MAN")
-            if b3.button("ELIMINA 🗑️", key=f"d_{i}", use_container_width=True): salva_db(df_attuale.drop(i)); st.rerun()
+    if not df_p.empty:
+        tot_imp = round(df_p['Stake'].astype(float).sum(), 2)
+        rit_pot = round((df_p['Stake'].astype(float) * df_p['Quota'].astype(float)).sum(), 2)
+        
+        st.markdown(f"""
+            <div style='background:#1c2128; padding:10px; border-radius:8px; display:flex; justify-content:space-around; text-align:center; margin-bottom:15px; border:1px solid #333;'>
+                <div style='color:white;'><small>IMPEGNATO</small><br><b style='color:#ffc107; font-size:18px;'>{tot_imp}€</b></div>
+                <div style='color:white; border-left:1px solid #444; padding-left:20px;'><small>RITORNO TOT.</small><br><b style='color:#00ff00; font-size:18px;'>{rit_pot}€</b></div>
+            </div>
+        """, unsafe_allow_html=True)
+
+        for i, r in df_p.iterrows():
+            camp = LEAGUE_NAMES.get(r['Sport_Key'], "⚽")
+            label_riga = f"{camp} | {r['Match']} | @{r['Quota']} | {r['Stake']}€"
+            with st.expander(label_riga):
+                st.markdown(f"**Dettaglio Operazione** 🏦 *{r['Bookmaker']}*")
+                c_inf1, c_inf2 = st.columns(2)
+                c_inf1.write(f"📅 Inizio: {r['Data Match']}")
+                c_inf1.write(f"🎯 Mercato: **{r['Scelta']}**")
+                c_inf2.write(f"💰 Puntata: {r['Stake']}€")
+                c_inf2.write(f"🟢 Possibile Vincita: {round(float(r['Stake'])*float(r['Quota']),2)}€")
+                st.divider()
+                b1, b2, b3 = st.columns(3)
+                if b1.button("VINTO ✅", key=f"w_{i}", use_container_width=True): chiudi_manualmente(i, "VINTO", "MAN")
+                if b2.button("PERSO ❌", key=f"l_{i}", use_container_width=True): chiudi_manualmente(i, "PERSO", "MAN")
+                if b3.button("ELIMINA 🗑️", key=f"d_{i}", use_container_width=True): salva_db(df_attuale.drop(i)); st.rerun()
+    else:
+        st.info("Nessuna operazione pendente.")
 
 # --- TAB 3: FISCALE ---
 with t3:
     if not df_attuale.empty:
-        prof = round(df_attuale['Profitto'].sum(), 2)
-        st.metric("📈 Profitto Netto", f"{prof} €")
-        st.progress(min(1.0, max(0.0, prof / OBIETTIVO_TARGET)) if prof > 0 else 0.0)
-        st.dataframe(df_attuale.sort_index(ascending=False), use_container_width=True)
+        df_vis = df_attuale.copy()
+        df_vis['Campionato'] = df_vis['Sport_Key'].map(LEAGUE_NAMES).fillna("Altro")
+        v_df = df_vis[df_vis['Esito'] == "VINTO"]
+        p_df = df_vis[df_vis['Esito'] == "PERSO"]
+        
+        profitto_netto = round(df_vis['Profitto'].sum(), 2)
+        win_rate = round((len(v_df) / (len(v_df) + len(p_df)) * 100), 1) if (len(v_df) + len(p_df)) > 0 else 0
+        
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("📈 Profitto Netto", f"{profitto_netto} €")
+        m2.metric("🎯 Win Rate", f"{win_rate} %")
+        m3.metric("💵 Giocato Tot.", f"{round(df_vis['Stake'].sum(), 2)} €")
+        m4.metric("📊 Match Chiusi", len(v_df) + len(p_df))
+        
+        st.write(f"### 🚀 Obiettivo Scalata: {OBIETTIVO_TARGET}€")
+        progresso = min(1.0, max(0.0, profitto_netto / OBIETTIVO_TARGET)) if profitto_netto > 0 else 0.0
+        st.progress(progresso)
+        
+        if (len(v_df) + len(p_df)) > 5 and profitto_netto > 0:
+            p_m = profitto_netto / (len(v_df) + len(p_df))
+            st.success(f"Mancano circa **{int((OBIETTIVO_TARGET - profitto_netto) / p_m)} match** alla vetta.")
+        
+        st.divider()
+        c_exp, c_imp = st.columns(2)
+        with c_exp:
+            st.download_button("📥 BACKUP", data=df_attuale.to_csv(index=False).encode('utf-8'), file_name=f"sniper_v14_2_{date.today()}.csv", use_container_width=True)
+        with c_imp:
+            up = st.file_uploader("Ripristina database", type="csv")
+            if up and st.button("🔄 CARICA CSV"):
+                salva_db(pd.read_csv(up)); st.rerun()
+        
+        st.divider()
+        def color_esito(row):
+            if row['Esito'] == "VINTO": return ['background-color: rgba(40, 167, 69, 0.2)'] * len(row)
+            if row['Esito'] == "PERSO": return ['background-color: rgba(220, 53, 69, 0.2)'] * len(row)
+            return ['background-color: rgba(255, 193, 7, 0.2)'] * len(row)
+
+        st.dataframe(df_vis.sort_index(ascending=False).style.apply(color_esito, axis=1), use_container_width=True)

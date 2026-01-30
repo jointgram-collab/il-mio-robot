@@ -54,30 +54,59 @@ def get_champions_key():
 def check_results():
     df = carica_db()
     pendenti = df[df['Esito'] == "Pendente"]
+    
     if pendenti.empty:
         st.info("Nessuna scommessa pendente.")
         return
+        
     cambiamenti = False
     with st.spinner("🔄 Verifica risultati..."):
+        # Raggruppiamo per Sport Key per fare meno chiamate API
         for skey in pendenti['Sport_Key'].unique():
-            res = requests.get(f'https://api.the-odds-api.com/v4/sports/{skey}/scores/', params={'api_key': API_KEY, 'daysFrom': 3})
+            # Estendiamo a 3 giorni fa per essere sicuri di prendere i recuperi
+            res = requests.get(f'https://api.the-odds-api.com/v4/sports/{skey}/scores/', 
+                             params={'api_key': API_KEY, 'daysFrom': 3})
+            
             if res.status_code == 200:
                 scores = res.json()
                 for i, r in pendenti[pendenti['Sport_Key'] == skey].iterrows():
-                    m_res = next((m for m in scores if f"{m['home_team']}-{m['away_team']}" == r['Match'] and m.get('completed')), None)
-                    if m_res:
-                        s = m_res['scores']
-                        if s:
-                            s1, s2 = int(s[0]['score']), int(s[1]['score'])
-                            vinto = (s1 + s2) > 2.5 if r['Scelta'] == "OVER 2.5" else (s1 + s2) < 2.5
+                    # Cerchiamo il match ignorando l'ordine (Home-Away o Away-Home)
+                    # e pulendo eventuali spazi bianchi
+                    m_parts = r['Match'].split('-')
+                    if len(m_parts) != 2: continue
+                    
+                    t1, t2 = m_parts[0].strip(), m_parts[1].strip()
+                    
+                    # Matching flessibile: verifica se entrambi i team sono presenti nello score
+                    m_res = next((m for m in scores if 
+                                 (t1 in [m['home_team'], m['away_team']] and 
+                                  t2 in [m['home_team'], m['away_team']])
+                                 and m.get('completed')), None)
+                    
+                    if m_res and m_res.get('scores'):
+                        # Estraiamo i punteggi correttamente associandoli ai team salvati
+                        s_list = m_res['scores']
+                        try:
+                            s1 = int(next(x['score'] for x in s_list if x['name'] == m_res['home_team']))
+                            s2 = int(next(x['score'] for x in s_list if x['name'] == m_res['away_team']))
+                            
+                            tot_gol = s1 + s2
+                            vinto = tot_gol > 2.5 if r['Scelta'] == "OVER 2.5" else tot_gol < 2.5
+                            
                             df.at[i, 'Esito'] = "VINTO" if vinto else "PERSO"
                             df.at[i, 'Risultato'] = f"{s1}-{s2}"
-                            df.at[i, 'Profitto'] = round((r['Stake'] * r['Quota']) - r['Stake'], 2) if vinto else -r['Stake']
+                            df.at[i, 'Profitto'] = round((r['Stake'] * r['Quota']) - r['Stake'], 2) if vinto else -float(r['Stake'])
                             cambiamenti = True
+                        except (StopIteration, ValueError):
+                            continue
+                            
     if cambiamenti:
         salva_db(df)
+        st.success(f"✅ Database aggiornato con successo!")
+        time.sleep(1)
         st.rerun()
-
+    else:
+        st.warning("⚠️ Partite trovate ma non ancora marcate come 'Completate' dall'API.")
 # --- INTERFACCIA ---
 st.title("🎯 AI SNIPER V13.6")
 df_attuale = carica_db()

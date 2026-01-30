@@ -14,7 +14,7 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 # Ho inserito le tue chiavi in una lista per la rotazione automatica
 API_KEYS = [
     '01f1c8f2a314814b17de03eeb6c53623', # Chiave 1
-    'INSERISCI_QUI_LA_TUA_SECONDA_CHIAVE' # Sostituisci questa stringa con la nuova chiave
+    '55f08c25f38fa1006dd9e66282170e1a' # Chiave 2 sniper.sport2026@gmail.com
 ]
 
 BUDGET_DISPONIBILE = 500.0

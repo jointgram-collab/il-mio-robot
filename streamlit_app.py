@@ -5,11 +5,30 @@ import time
 from datetime import datetime, timedelta, date
 from streamlit_gsheets import GSheetsConnection
 
-# --- CONFIGURAZIONE UI ---
-st.set_page_config(page_title="AI SNIPER V14.2 - FULL STABLE", layout="wide")
+# --- CONFIGURAZIONE CHIAVI ---
+API_KEYS = [
+    '01f1c8f2a314814b17de03eeb6c53623',  # Chiave Principale
+    'a9b4beb96e4c27dc96b12ee2c520e253'     # Chiave Secondaria
+]
 
-conn = st.connection("gsheets", type=GSheetsConnection)
-API_KEY = '01f1c8f2a314814b17de03eeb6c53623'
+def chiama_api(endpoint, params):
+    """Prova a chiamare l'API con la prima chiave, se fallisce passa alla seconda"""
+    for key in API_KEYS:
+        params['api_key'] = key
+        r = requests.get(endpoint, params=params)
+        
+        # Se la chiave è esaurita (Errore 429), prova la successiva
+        if r.status_code == 429:
+            continue 
+        
+        # Se la risposta è OK (200), aggiorna le stats e restituisci i dati
+        if r.status_code == 200:
+            aggiorna_api_stats(r.headers)
+            return r
+            
+    # Se tutte le chiavi falliscono
+    st.error("❌ Tutte le API Keys sono esaurite o non valide!")
+    return None
 
 # Costanti Obiettivo e Budget
 BUDGET_DISPONIBILE = 500.0

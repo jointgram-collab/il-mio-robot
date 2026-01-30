@@ -2,11 +2,11 @@ import streamlit as st
 import pandas as pd
 import requests
 import re
-from datetime import datetime, date
+from datetime import datetime, timedelta
 from streamlit_gsheets import GSheetsConnection
 
-# --- CONFIGURAZIONE UI ---
-st.set_page_config(page_title="AI SNIPER V13.8 - FIXED", layout="wide")
+# --- UI & STYLE (Basato sui tuoi screenshot) ---
+st.set_page_config(page_title="AI SNIPER V13.9 - ULTRA FORCE", layout="wide")
 
 st.markdown("""
     <style>
@@ -21,16 +21,12 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- MOTORE DI PULIZIA NOMI (IL CUORE DEL FIX) ---
+# --- LOGICA DI PULIZIA ---
 def ultra_clean(text):
-    """Pulisce radicalmente i nomi delle squadre per il confronto."""
     if not text: return ""
     text = text.upper()
-    # Rimuove sigle comuni che creano discrepanze
-    sigle = [" FC", " AS", " AC", " SS", " CF", " FK", " UNITED", " CITY", "TOWN", " CLUB", " REAL", " DE "]
-    for s in sigle:
+    for s in [" FC", " AS", " AC", " SS", " CF", " FK", " UNITED", " CITY", " CLUB", " REAL"]:
         text = text.replace(s, "")
-    # Tiene solo lettere e numeri
     return "".join(re.findall(r'[A-Z0-9]', text))
 
 # --- GESTIONE DATI ---
@@ -48,20 +44,19 @@ def salva_db(df):
     conn.update(worksheet="Giocate", data=df)
     st.cache_data.clear()
 
-# --- FUNZIONE AGGIORNA POTENZIATA ---
-def check_results_v13_8():
+# --- FUNZIONE AGGIORNA 13.9 (LOGICA AGGRESSIVA) ---
+def force_update_results():
     df = carica_db()
     if df.empty: return
     pendenti = df[df['Esito'] == "Pendente"]
-    if pendenti.empty:
-        st.info("Nessuna scommessa pendente da controllare.")
-        return
+    if pendenti.empty: return
     
     cambiamenti = False
-    with st.spinner("🔄 Analisi profonda dei risultati in corso..."):
-        # Raggruppiamo per sport per risparmiare chiamate API
+    with st.spinner("🚀 Forzatura aggiornamento in corso..."):
         for skey in pendenti['Sport_Key'].unique():
-            res = requests.get(f'https://api.the-odds-api.com/v4/sports/{skey}/scores/', params={'api_key': API_KEY, 'daysFrom': 3})
+            # Chiediamo i punteggi degli ultimi 3 giorni
+            res = requests.get(f'https://api.the-odds-api.com/v4/sports/{skey}/scores/', 
+                             params={'api_key': API_KEY, 'daysFrom': 3})
             
             if res.status_code == 200:
                 scores_api = res.json()
@@ -69,79 +64,62 @@ def check_results_v13_8():
                     m_parts = row['Match'].split('-')
                     if len(m_parts) < 2: continue
                     
-                    # Pulizia nomi database
-                    db_h = ultra_clean(m_parts[0])
-                    db_a = ultra_clean(m_parts[1])
+                    db_h, db_a = ultra_clean(m_parts[0]), ultra_clean(m_parts[1])
                     
-                    # Cerca il match con logica "contiene"
-                    match_trovato = None
-                    for m_api in scores_api:
-                        api_h = ultra_clean(m_api['home_team'])
-                        api_a = ultra_clean(m_api['away_team'])
-                        
-                        # Controllo incrociato: se i nomi puliti combaciano o sono contenuti l'uno nell'altro
-                        if (db_h in api_h or api_h in db_h) and (db_a in api_a or api_a in db_a):
-                            match_trovato = m_api
-                            break
+                    # Cerchiamo il match
+                    match_api = next((m for m in scores_api if 
+                                     (db_h in ultra_clean(m['home_team']) or ultra_clean(m['home_team']) in db_h) and 
+                                     (db_a in ultra_clean(m['away_team']) or ultra_clean(m['away_team']) in db_a)), None)
                     
-                    if match_trovato and match_trovato.get('scores'):
+                    # LOGICA AGGRESSIVA: Se trovo punteggi, aggiorno a prescindere dal flag 'completed'
+                    if match_api and match_api.get('scores'):
                         try:
-                            s = match_trovato['scores']
-                            h_score = int(next(x['score'] for x in s if x['name'] == match_trovato['home_team']))
-                            a_score = int(next(x['score'] for x in s if x['name'] == match_trovato['away_team']))
+                            s = match_api['scores']
+                            h_score = int(next(x['score'] for x in s if x['name'] == match_api['home_team']))
+                            a_score = int(next(x['score'] for x in s if x['name'] == match_api['away_team']))
                             
+                            # Calcolo Esito
                             tot_gol = h_score + a_score
-                            is_over = "OVER 2.5" in row['Scelta'].upper()
+                            is_over = "OVER" in row['Scelta'].upper()
                             vinto = tot_gol > 2.5 if is_over else tot_gol < 2.5
                             
                             df.at[idx, 'Esito'] = "VINTO" if vinto else "PERSO"
                             df.at[idx, 'Risultato'] = f"{h_score}-{a_score}"
-                            
-                            q = float(row['Quota'])
-                            stk = float(row['Stake'])
+                            q, stk = float(row['Quota']), float(row['Stake'])
                             df.at[idx, 'Profitto'] = round((stk * q) - stk, 2) if vinto else -stk
                             cambiamenti = True
-                        except Exception as e:
-                            continue
+                        except: continue
 
     if cambiamenti:
         salva_db(df)
-        st.success(f"✅ Aggiornati {df[df['Esito'] != 'Pendente'].shape[0]} risultati!")
+        st.success("✅ Partite chiuse con successo!")
         st.rerun()
     else:
-        st.warning("⚠️ L'API ha restituito i dati ma i match non sono ancora marcati come conclusi con punteggio finale.")
+        st.error("❌ Nessun punteggio trovato. Verifica che i nomi nel DB siano corretti.")
 
-# --- INTERFACCIA ---
-st.title("🎯 AI SNIPER V13.8")
+# --- UI PRINCIPALE ---
+st.title("🎯 AI SNIPER V13.9")
 df_attuale = carica_db()
 
-t1, t2, t3 = st.tabs(["🔍 SCANNER", "💼 PORTAFOGLIO", "📊 FISCALE"])
+# Tabella Statistiche (come image_8e6bb7.png)
+df_p = df_attuale[df_attuale['Esito'] == "Pendente"] if not df_attuale.empty else pd.DataFrame()
+tot_imp = round(df_p['Stake'].astype(float).sum(), 2) if not df_p.empty else 0.0
+rit_pot = round((df_p['Stake'].astype(float) * df_p['Quota'].astype(float)).sum(), 2) if not df_p.empty else 0.0
 
-with t2:
-    # Mostriamo i box statistiche basati sulle immagini
-    df_p = df_attuale[df_attuale['Esito'] == "Pendente"] if not df_attuale.empty else pd.DataFrame()
-    tot_imp = round(df_p['Stake'].astype(float).sum(), 2) if not df_p.empty else 0.0
-    rit_pot = round((df_p['Stake'].astype(float) * df_p['Quota'].astype(float)).sum(), 2) if not df_p.empty else 0.0
-
-    st.markdown(f"""
-    <div class="metric-container">
-        <div class="metric-box">
-            <div style="color:#8b949e;">TOTALE IMPEGNATO</div>
-            <div class="metric-value" style="color:#ffc107;">{tot_imp} €</div>
-        </div>
-        <div class="metric-box">
-            <div style="color:#8b949e;">RITORNO POTENZIALE</div>
-            <div class="metric-value" style="color:#39d353;">{rit_pot} €</div>
-        </div>
+st.markdown(f"""
+<div class="metric-container">
+    <div class="metric-box">
+        <div style="color:#8b949e; font-weight:600;">TOTALE IMPEGNATO</div>
+        <div class="metric-value" style="color:#ffc107;">{tot_imp} €</div>
     </div>
-    """, unsafe_allow_html=True)
+    <div class="metric-box">
+        <div style="color:#8b949e; font-weight:600;">RITORNO POTENZIALE</div>
+        <div class="metric-value" style="color:#39d353;">{rit_pot} €</div>
+    </div>
+</div>
+""", unsafe_allow_html=True)
 
-    st.button("🔄 FORZA AGGIORNAMENTO RISULTATI", on_click=check_results_v13_8, use_container_width=True)
-    
-    if not df_p.empty:
-        st.dataframe(df_p, use_container_width=True)
-    else:
-        st.info("Tutti i risultati sono aggiornati.")
+st.button("🔥 FORZA CHIUSURA SCOMMESSE", on_click=force_update_results, use_container_width=True)
 
-with t3:
-    st.dataframe(df_attuale, use_container_width=True)
+st.write("### Portafoglio Attuale")
+st.dataframe(df_attuale, use_container_width=True)

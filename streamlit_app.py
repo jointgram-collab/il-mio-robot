@@ -6,12 +6,12 @@ from datetime import datetime, timedelta, date
 from streamlit_gsheets import GSheetsConnection
 
 # --- CONFIGURAZIONE UI ---
-st.set_page_config(page_title="AI SNIPER V14.1 - STABLE FULL", layout="wide")
+st.set_page_config(page_title="AI SNIPER V14.2 - FULL STABLE", layout="wide")
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 API_KEY = '01f1c8f2a314814b17de03eeb6c53623'
 
-# Costanti Obiettivo e Budget (Basate sulle tue preferenze salvate)
+# Costanti Obiettivo e Budget
 BUDGET_DISPONIBILE = 500.0
 OBIETTIVO_TARGET = 5000.0
 
@@ -42,18 +42,18 @@ def salva_db(df):
     conn.update(worksheet="Giocate", data=df)
     st.cache_data.clear()
 
-def chiudi_manualmente(idx, esito):
+def chiudi_manualmente(idx, esito, risultato_score="-"):
     df = carica_db()
     if idx in df.index:
         q, s = float(df.at[idx, 'Quota']), float(df.at[idx, 'Stake'])
         df.at[idx, 'Esito'] = esito
-        df.at[idx, 'Risultato'] = "MANUALE"
+        df.at[idx, 'Risultato'] = risultato_score
         df.at[idx, 'Profitto'] = round((s * q) - s, 2) if esito == "VINTO" else -s
         salva_db(df)
         st.rerun()
 
 # --- INTERFACCIA ---
-st.title("🎯 AI SNIPER V14.1")
+st.title("🎯 AI SNIPER V14.2")
 df_attuale = carica_db()
 
 with st.sidebar:
@@ -133,9 +133,29 @@ with t1:
                         st.divider()
             except: continue
 
-# --- TAB 2: PORTAFOGLIO (Compact Row Design) ---
+# --- TAB 2: PORTAFOGLIO (AUTO-CHECK + EXPANDER) ---
 with t2:
     df_p = df_attuale[df_attuale['Esito'] == "Pendente"]
+    
+    col_a, col_b = st.columns([2, 1])
+    with col_a:
+        if st.button("🤖 AUTO-CHECK RISULTATI", use_container_width=True, type="primary"):
+            with st.spinner("Interrogazione API Risultati..."):
+                for idx, row in df_p.iterrows():
+                    res = requests.get(f"https://api.the-odds-api.com/v4/sports/{row['Sport_Key']}/scores/", params={'api_key': API_KEY, 'daysFrom': 3})
+                    if res.status_code == 200:
+                        scores = res.json()
+                        match_data = next((s for s in scores if s['home_team'] in row['Match'] and s['away_team'] in row['Match'] and s['completed']), None)
+                        if match_data:
+                            h_score = int(match_data['scores'][0]['score'])
+                            a_score = int(match_data['scores'][1]['score'])
+                            tot_gol = h_score + a_score
+                            final_s = f"{h_score}-{a_score}"
+                            
+                            esito_finale = "VINTO" if (row['Scelta'] == "OVER 2.5" and tot_gol > 2.5) or (row['Scelta'] == "UNDER 2.5" and tot_gol < 2.5) else "PERSO"
+                            chiudi_manualmente(idx, esito_finale, final_s)
+            st.rerun()
+
     if not df_p.empty:
         tot_imp = round(df_p['Stake'].astype(float).sum(), 2)
         rit_pot = round((df_p['Stake'].astype(float) * df_p['Quota'].astype(float)).sum(), 2)
@@ -149,9 +169,7 @@ with t2:
 
         for i, r in df_p.iterrows():
             camp = LEAGUE_NAMES.get(r['Sport_Key'], "⚽")
-            # Label riga unica compatta
             label_riga = f"{camp} | {r['Match']} | @{r['Quota']} | {r['Stake']}€"
-            
             with st.expander(label_riga):
                 st.markdown(f"**Dettaglio Operazione** 🏦 *{r['Bookmaker']}*")
                 c_inf1, c_inf2 = st.columns(2)
@@ -159,15 +177,13 @@ with t2:
                 c_inf1.write(f"🎯 Mercato: **{r['Scelta']}**")
                 c_inf2.write(f"💰 Puntata: {r['Stake']}€")
                 c_inf2.write(f"🟢 Possibile Vincita: {round(float(r['Stake'])*float(r['Quota']),2)}€")
-                
                 st.divider()
                 b1, b2, b3 = st.columns(3)
-                if b1.button("VINTO ✅", key=f"w_{i}", use_container_width=True): chiudi_manualmente(i, "VINTO")
-                if b2.button("PERSO ❌", key=f"l_{i}", use_container_width=True): chiudi_manualmente(i, "PERSO")
-                if b3.button("ELIMINA 🗑️", key=f"d_{i}", use_container_width=True): 
-                    salva_db(df_attuale.drop(i)); st.rerun()
+                if b1.button("VINTO ✅", key=f"w_{i}", use_container_width=True): chiudi_manualmente(i, "VINTO", "MAN")
+                if b2.button("PERSO ❌", key=f"l_{i}", use_container_width=True): chiudi_manualmente(i, "PERSO", "MAN")
+                if b3.button("ELIMINA 🗑️", key=f"d_{i}", use_container_width=True): salva_db(df_attuale.drop(i)); st.rerun()
     else:
-        st.info("Nessuna operazione pendente. Avvia una scansione per iniziare.")
+        st.info("Nessuna operazione pendente.")
 
 # --- TAB 3: FISCALE ---
 with t3:
@@ -186,25 +202,18 @@ with t3:
         m3.metric("💵 Giocato Tot.", f"{round(df_vis['Stake'].sum(), 2)} €")
         m4.metric("📊 Match Chiusi", len(v_df) + len(p_df))
         
-        # Simulatore Scalata 5000€
         st.write(f"### 🚀 Obiettivo Scalata: {OBIETTIVO_TARGET}€")
         progresso = min(1.0, max(0.0, profitto_netto / OBIETTIVO_TARGET)) if profitto_netto > 0 else 0.0
         st.progress(progresso)
         
-        col_p1, col_p2 = st.columns([1, 1])
-        col_p1.caption(f"Completato: {int(progresso*100)}%")
-        
         if (len(v_df) + len(p_df)) > 5 and profitto_netto > 0:
-            profitto_per_match = profitto_netto / (len(v_df) + len(p_df))
-            match_mancanti = int((OBIETTIVO_TARGET - profitto_netto) / profitto_per_match)
-            col_p2.markdown(f"<p style='text-align:right;color:#00ff00;'><b>Mancano circa {match_mancanti} match</b></p>", unsafe_allow_html=True)
-        else:
-            col_p2.markdown("<p style='text-align:right;'>Dati insufficienti per predizione</p>", unsafe_allow_html=True)
+            p_m = profitto_netto / (len(v_df) + len(p_df))
+            st.success(f"Mancano circa **{int((OBIETTIVO_TARGET - profitto_netto) / p_m)} match** alla vetta.")
         
         st.divider()
         c_exp, c_imp = st.columns(2)
         with c_exp:
-            st.download_button("📥 SCARICA BACKUP", data=df_attuale.to_csv(index=False).encode('utf-8'), file_name=f"sniper_v14_1_{date.today()}.csv", use_container_width=True)
+            st.download_button("📥 BACKUP", data=df_attuale.to_csv(index=False).encode('utf-8'), file_name=f"sniper_v14_2_{date.today()}.csv", use_container_width=True)
         with c_imp:
             up = st.file_uploader("Ripristina database", type="csv")
             if up and st.button("🔄 CARICA CSV"):
@@ -216,8 +225,4 @@ with t3:
             if row['Esito'] == "PERSO": return ['background-color: rgba(220, 53, 69, 0.2)'] * len(row)
             return ['background-color: rgba(255, 193, 7, 0.2)'] * len(row)
 
-        st.write("### Storico Operazioni Chiusure")
-        cols_ordine = ["Data Match", "Campionato", "Match", "Scelta", "Quota", "Stake", "Esito", "Profitto", "Risultato", "Bookmaker"]
-        st.dataframe(df_vis[cols_ordine].sort_index(ascending=False).style.apply(color_esito, axis=1), use_container_width=True)
-    else:
-        st.info("Database vuoto. Registra la tua prima giocata per vedere le statistiche.")
+        st.dataframe(df_vis.sort_index(ascending=False).style.apply(color_esito, axis=1), use_container_width=True)

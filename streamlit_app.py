@@ -6,10 +6,14 @@ from datetime import datetime, timedelta, date
 from streamlit_gsheets import GSheetsConnection
 
 # --- CONFIGURAZIONE UI ---
-st.set_page_config(page_title="AI SNIPER V13.6 - STABLE FULL", layout="wide")
+st.set_page_config(page_title="AI SNIPER V13.8 - STABLE", layout="wide")
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 API_KEY = '01f1c8f2a314814b17de03eeb6c53623'
+
+# Parametri Utente (Salvati come da tua richiesta)
+BUDGET_DISPONIBILE = 500.0
+OBIETTIVO_TARGET = 5000.0
 
 if 'api_usage' not in st.session_state:
     st.session_state['api_usage'] = {'remaining': "N/D", 'used': "N/D"}
@@ -49,7 +53,7 @@ def chiudi_manualmente(idx, esito):
         st.rerun()
 
 # --- INTERFACCIA ---
-st.title("🎯 AI SNIPER V13.6")
+st.title("🎯 AI SNIPER V13.8")
 df_attuale = carica_db()
 
 with st.sidebar:
@@ -58,9 +62,9 @@ with st.sidebar:
     c1.metric("Residui", st.session_state['api_usage']['remaining'])
     c2.metric("Usati", st.session_state['api_usage']['used'])
     st.divider()
-    budget_cassa = st.number_input("Budget (€)", value=500.0)
-    rischio = st.slider("Kelly", 0.05, 0.50, 0.20)
-    soglia_val = st.slider("Valore Min %", 0, 15, 3) / 100
+    budget_cassa = st.number_input("Cassa Operativa (€)", value=BUDGET_DISPONIBILE)
+    rischio = st.slider("Aggressività (Kelly)", 0.05, 0.50, 0.20)
+    soglia_val = st.slider("Filtro Valore Min %", 0, 15, 3) / 100
 
 t1, t2, t3 = st.tabs(["🔍 SCANNER", "💼 PORTAFOGLIO", "📊 FISCALE"])
 
@@ -135,7 +139,6 @@ with t2:
     if not df_p.empty:
         tot_imp = round(df_p['Stake'].astype(float).sum(), 2)
         rit_pot = round((df_p['Stake'].astype(float) * df_p['Quota'].astype(float)).sum(), 2)
-        # Fix Colore Testo Bianco
         st.markdown(f"""
             <div style='background:#1c2128; padding:15px; border-radius:10px; display:flex; justify-content:space-around; text-align:center;'>
                 <div><small style='color:white;'>IMPEGNATO</small><br><strong style='color:#ffc107; font-size:20px;'>{tot_imp}€</strong></div>
@@ -157,15 +160,30 @@ with t3:
     if not df_attuale.empty:
         df_vis = df_attuale.copy()
         df_vis['Campionato'] = df_vis['Sport_Key'].map(LEAGUE_NAMES).fillna("Altro")
+        
         v_df = df_vis[df_vis['Esito'] == "VINTO"]
         p_df = df_vis[df_vis['Esito'] == "PERSO"]
+        
+        tot_vinto_lordo = round((v_df['Stake'] + v_df['Profitto']).sum(), 2)
+        profitto_netto = round(df_vis['Profitto'].sum(), 2)
         win_rate = round((len(v_df) / (len(v_df) + len(p_df)) * 100), 1) if (len(v_df) + len(p_df)) > 0 else 0
         
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("📈 Profitto Netto", f"{round(df_vis['Profitto'].sum(), 2)} €")
-        m2.metric("🎯 Win Rate", f"{win_rate} %")
-        m3.metric("💰 Tot. Giocato", f"{round(df_vis['Stake'].sum(), 2)} €")
-        m4.metric("📊 Match Chiusi", len(v_df) + len(p_df))
+        # Metriche
+        m1, m2, m3, m4, m5 = st.columns(5)
+        m1.metric("📈 Netto", f"{profitto_netto} €")
+        m2.metric("💰 Vinto Lordo", f"{tot_vinto_lordo} €")
+        m3.metric("🎯 Win Rate", f"{win_rate} %")
+        m4.metric("💵 Giocato", f"{round(df_vis['Stake'].sum(), 2)} €")
+        m5.metric("📊 Match", len(v_df) + len(p_df))
+        
+        # Grafico Scalata 5000€
+        st.write(f"### 🚀 Scalata verso l'Obiettivo: {OBIETTIVO_TARGET}€")
+        progresso = min(1.0, max(0.0, profitto_netto / OBIETTIVO_TARGET)) if profitto_netto > 0 else 0.0
+        st.progress(progresso)
+        col_p1, col_p2 = st.columns([1, 1])
+        col_p1.caption(f"Progresso: {int(progresso*100)}%")
+        mancano = round(OBIETTIVO_TARGET - profitto_netto, 2)
+        col_p2.markdown(f"<p style='text-align:right;color:#00ff00;'>Mancano: {max(0.0, mancano)}€</p>", unsafe_allow_html=True)
         
         st.divider()
         c_exp, c_imp = st.columns(2)
@@ -186,3 +204,5 @@ with t3:
         st.write("### Storico Operazioni")
         cols_ordine = ["Data Match", "Campionato", "Match", "Scelta", "Quota", "Stake", "Esito", "Profitto", "Risultato", "Bookmaker"]
         st.dataframe(df_vis[cols_ordine].sort_index(ascending=False).style.apply(color_esito, axis=1), use_container_width=True)
+    else:
+        st.info("Nessun dato presente nel Fiscale.")

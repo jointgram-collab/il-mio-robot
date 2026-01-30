@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, date
 from streamlit_gsheets import GSheetsConnection
 
 # --- CONFIGURAZIONE UI ---
-st.set_page_config(page_title="AI SNIPER V14.8 - PRO PORTFOLIO", layout="wide")
+st.set_page_config(page_title="AI SNIPER V14.9 - FULL STATS", layout="wide")
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 
@@ -16,7 +16,6 @@ API_KEYS = [
     '55f08c25f38fa1006dd9e66282170e1a' 
 ]
 
-# Parametri Utente (500€ Budget -> 5000€ Target)
 BUDGET_DISPONIBILE = 500.0
 OBIETTIVO_TARGET = 5000.0
 
@@ -80,7 +79,7 @@ def chiudi_gara(idx, esito, risultato_score="-"):
         st.rerun()
 
 # --- INTERFACCIA ---
-st.title("🎯 AI SNIPER V14.8")
+st.title("🎯 AI SNIPER V14.9")
 df_attuale = carica_db()
 
 with st.sidebar:
@@ -90,7 +89,7 @@ with st.sidebar:
     c1.metric("Residui", st.session_state['api_usage']['remaining'])
     c2.metric("Usati", st.session_state['api_usage']['used'])
     st.divider()
-    budget_cassa = st.number_input("Cassa Operativa (€)", value=BUDGET_DISPONIBILE)
+    budget_cassa = st.number_input("Cassa (€)", value=BUDGET_DISPONIBILE)
     rischio = st.slider("Kelly %", 0.05, 0.50, 0.15)
     soglia_val = st.slider("Valore Min %", 0, 15, 3) / 100
 
@@ -150,12 +149,11 @@ with t1:
                         salva_db(pd.concat([df_attuale, nuova], ignore_index=True)); st.rerun()
             except: continue
 
-# --- TAB 2: PORTAFOGLIO (RIGA AGGIORNATA) ---
+# --- TAB 2: PORTAFOGLIO ---
 with t2:
     df_p = df_attuale[df_attuale['Esito'] == "Pendente"]
-    
     if st.button("🤖 AUTO-CHECK RISULTATI", use_container_width=True, type="primary"):
-        with st.spinner("Sincronizzazione risultati..."):
+        with st.spinner("Sincronizzazione..."):
             for idx, row in df_p.iterrows():
                 data = chiamata_sicura_api(f"https://api.the-odds-api.com/v4/sports/{row['Sport_Key']}/scores/", {'daysFrom': 3})
                 if data:
@@ -169,19 +167,8 @@ with t2:
     if not df_p.empty:
         for i, r in df_p.iterrows():
             vincita_pot = round(float(r['Stake']) * float(r['Quota']), 2)
-            camp_icon = LEAGUE_NAMES.get(r['Sport_Key'], "⚽")
-            
-            # --- RIGA PRINCIPALE OTTIMIZZATA ---
-            label_main = f"{r['Data Match']} | {r['Match']} | {r['Scelta']} | 🏦 {r['Bookmaker']} | {camp_icon} | 💰 {vincita_pot}€"
-            
+            label_main = f"{r['Data Match']} | {r['Match']} | {r['Scelta']} | 🏦 {r['Bookmaker']} | 💰 {vincita_pot}€"
             with st.expander(label_main):
-                st.markdown(f"**Gestione Scommessa**")
-                c_inf1, c_inf2 = st.columns(2)
-                c_inf1.write(f"📈 Quota Giocata: **@{r['Quota']}**")
-                c_inf1.write(f"💸 Stake Investito: **{r['Stake']}€**")
-                c_inf2.write(f"📍 Campionato ID: `{r['Sport_Key']}`")
-                
-                st.divider()
                 b1, b2, b3 = st.columns(3)
                 if b1.button("VINTO ✅", key=f"w_{i}", use_container_width=True): chiudi_gara(i, "VINTO", "MAN")
                 if b2.button("PERSO ❌", key=f"l_{i}", use_container_width=True): chiudi_gara(i, "PERSO", "MAN")
@@ -189,23 +176,56 @@ with t2:
     else:
         st.info("Nessuna scommessa pendente.")
 
-# --- TAB 3: FISCALE ---
+# --- TAB 3: FISCALE (POTENZIATO) ---
 with t3:
     if not df_attuale.empty:
-        df_vis = df_attuale.copy()
-        profitto_netto = round(df_vis['Profitto'].sum(), 2)
-        v_chiusi = len(df_vis[df_vis['Esito'] != "Pendente"])
-        win_rate = round((len(df_vis[df_vis['Esito']=="VINTO"]) / v_chiusi * 100), 1) if v_chiusi > 0 else 0
+        # Calcolo Statistiche
+        df_stats = df_attuale.copy()
+        v_df = df_stats[df_stats['Esito'] == "VINTO"]
+        p_df = df_stats[df_stats['Esito'] == "PERSO"]
+        pen_df = df_stats[df_stats['Esito'] == "Pendente"]
         
-        m1, m2, m3 = st.columns(3)
-        m1.metric("📈 Profitto Netto", f"{profitto_netto} €")
-        m2.metric("🎯 Win Rate", f"{win_rate} %")
-        m3.metric("🏁 Goal", f"{OBIETTIVO_TARGET} €")
+        chiuse_count = len(v_df) + len(p_df)
+        profitto_netto = round(df_stats['Profitto'].sum(), 2)
+        win_rate = round((len(v_df) / chiuse_count * 100), 1) if chiuse_count > 0 else 0
+        roi = round((profitto_netto / df_stats[df_stats['Esito'] != "Pendente"]['Stake'].sum() * 100), 1) if chiuse_count > 0 else 0
         
-        st.progress(min(1.0, max(0.0, profitto_netto / OBIETTIVO_TARGET)) if profitto_netto > 0 else 0.0)
-        st.caption(f"Progresso Scalata: {int((profitto_netto/OBIETTIVO_TARGET)*100)}% verso il target di 5000€")
+        # Righe Metriche
+        st.subheader("📈 Performance Generale")
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Profitto Totale", f"{profitto_netto} €")
+        m2.metric("Win Rate", f"{win_rate} %")
+        m3.metric("ROI", f"{roi} %")
+        m4.metric("Match Pendenti", len(pen_df))
         
+        # Barra Progresso Obiettivo
         st.divider()
-        st.dataframe(df_vis.sort_index(ascending=False), use_container_width=True)
+        st.write(f"### 🚀 Scalata: {profitto_netto}€ / {OBIETTIVO_TARGET}€")
+        prog_val = min(1.0, max(0.0, profitto_netto / OBIETTIVO_TARGET)) if profitto_netto > 0 else 0.0
+        st.progress(prog_val)
         
-        st.download_button("📥 BACKUP CSV", data=df_attuale.to_csv(index=False).encode('utf-8'), file_name=f"sniper_v14_8_{date.today()}.csv", use_container_width=True)
+        # Tabella con Colori
+        st.write("### 📜 Storico Operazioni")
+        
+        def highlight_esito(row):
+            color = ''
+            if row.Esito == 'VINTO': color = 'background-color: rgba(40, 167, 69, 0.3)' # Verde
+            elif row.Esito == 'PERSO': color = 'background-color: rgba(220, 53, 69, 0.3)' # Rosso
+            elif row.Esito == 'Pendente': color = 'background-color: rgba(255, 193, 7, 0.2)' # Giallo/Ambra
+            return [color] * len(row)
+
+        st.dataframe(
+            df_stats.sort_index(ascending=False).style.apply(highlight_esito, axis=1),
+            use_container_width=True,
+            height=400
+        )
+        
+        # Download e Reset
+        st.divider()
+        c_dl, c_res = st.columns(2)
+        c_dl.download_button("📥 Scarica Report CSV", data=df_attuale.to_csv(index=False), file_name=f"sniper_report_{date.today()}.csv")
+        if c_res.button("🗑️ Svuota Database (Attenzione!)"):
+            if st.checkbox("Confermo la cancellazione totale"):
+                salva_db(pd.DataFrame(columns=df_attuale.columns)); st.rerun()
+    else:
+        st.info("Ancora nessun dato disponibile per le statistiche.")

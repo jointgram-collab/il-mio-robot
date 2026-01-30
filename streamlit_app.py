@@ -6,12 +6,12 @@ from datetime import datetime, timedelta, date
 from streamlit_gsheets import GSheetsConnection
 
 # --- CONFIGURAZIONE UI ---
-st.set_page_config(page_title="AI SNIPER V13.8 - STABLE", layout="wide")
+st.set_page_config(page_title="AI SNIPER V13.9 - PREDICTIVE", layout="wide")
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 API_KEY = '01f1c8f2a314814b17de03eeb6c53623'
 
-# Parametri Utente (Salvati come da tua richiesta)
+# Costanti Obiettivo
 BUDGET_DISPONIBILE = 500.0
 OBIETTIVO_TARGET = 5000.0
 
@@ -30,7 +30,7 @@ LEAGUE_NAMES = {
     "soccer_uefa_champions_league": "🏆 Champions"
 }
 
-# --- MOTORE DATABASE ---
+# --- FUNZIONI CORE ---
 def carica_db():
     try:
         df = conn.read(worksheet="Giocate", ttl=0)
@@ -53,7 +53,7 @@ def chiudi_manualmente(idx, esito):
         st.rerun()
 
 # --- INTERFACCIA ---
-st.title("🎯 AI SNIPER V13.8")
+st.title("🎯 AI SNIPER V13.9")
 df_attuale = carica_db()
 
 with st.sidebar:
@@ -63,7 +63,7 @@ with st.sidebar:
     c2.metric("Usati", st.session_state['api_usage']['used'])
     st.divider()
     budget_cassa = st.number_input("Cassa Operativa (€)", value=BUDGET_DISPONIBILE)
-    rischio = st.slider("Aggressività (Kelly)", 0.05, 0.50, 0.20)
+    rischio = st.slider("Aggressività (Kelly)", 0.05, 0.50, 0.15)
     soglia_val = st.slider("Filtro Valore Min %", 0, 15, 3) / 100
 
 t1, t2, t3 = st.tabs(["🔍 SCANNER", "💼 PORTAFOGLIO", "📊 FISCALE"])
@@ -72,10 +72,10 @@ t1, t2, t3 = st.tabs(["🔍 SCANNER", "💼 PORTAFOGLIO", "📊 FISCALE"])
 with t1:
     leagues = {v: k for k, v in LEAGUE_NAMES.items()}
     c_sel, c_all, c_sing, c_ore = st.columns([1.5, 1, 1, 1])
-    sel_name = c_sel.selectbox("Seleziona Campionato:", list(leagues.keys()))
-    ore_limite = c_ore.selectbox("Finestra Ore:", [24, 48, 72, 96, 120, 168], index=2)
+    sel_name = c_sel.selectbox("Campionato:", list(leagues.keys()))
+    ore_limite = c_ore.selectbox("Window Ore:", [24, 48, 72, 96, 120, 168], index=2)
     
-    if c_all.button("🚀 TOTALE", use_container_width=True):
+    if c_all.button("🚀 SCAN TOTALE", use_container_width=True):
         all_found = []
         keys_to_scan = list(LEAGUE_NAMES.keys())
         pbar = st.progress(0)
@@ -92,7 +92,7 @@ with t1:
         st.session_state['api_data'] = all_found
         st.rerun()
 
-    if c_sing.button("🔍 SINGOLA", use_container_width=True):
+    if c_sing.button("🔍 SCAN SINGOLO", use_container_width=True):
         target_key = leagues[sel_name]
         res = requests.get(f'https://api.the-odds-api.com/v4/sports/{target_key}/odds/', params={'api_key': API_KEY, 'regions': 'eu', 'markets': 'totals'})
         if res.status_code == 200:
@@ -155,54 +155,50 @@ with t2:
             if c4.button("🗑️", key=f"d_{i}"): salva_db(df_attuale.drop(i)); st.rerun()
     else: st.info("Nessuna giocata pendente.")
 
-# --- TAB 3: FISCALE ---
+# --- TAB 3: FISCALE (Update Simulatore) ---
 with t3:
     if not df_attuale.empty:
         df_vis = df_attuale.copy()
         df_vis['Campionato'] = df_vis['Sport_Key'].map(LEAGUE_NAMES).fillna("Altro")
+        v_df = df_vis[df_vis['Esito'] == "VINTO"]; p_df = df_vis[df_vis['Esito'] == "PERSO"]
         
-        v_df = df_vis[df_vis['Esito'] == "VINTO"]
-        p_df = df_vis[df_vis['Esito'] == "PERSO"]
-        
-        tot_vinto_lordo = round((v_df['Stake'] + v_df['Profitto']).sum(), 2)
         profitto_netto = round(df_vis['Profitto'].sum(), 2)
         win_rate = round((len(v_df) / (len(v_df) + len(p_df)) * 100), 1) if (len(v_df) + len(p_df)) > 0 else 0
         
-        # Metriche
-        m1, m2, m3, m4, m5 = st.columns(5)
-        m1.metric("📈 Netto", f"{profitto_netto} €")
-        m2.metric("💰 Vinto Lordo", f"{tot_vinto_lordo} €")
-        m3.metric("🎯 Win Rate", f"{win_rate} %")
-        m4.metric("💵 Giocato", f"{round(df_vis['Stake'].sum(), 2)} €")
-        m5.metric("📊 Match", len(v_df) + len(p_df))
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("📈 Profitto Netto", f"{profitto_netto} €")
+        m2.metric("🎯 Win Rate", f"{win_rate} %")
+        m3.metric("💵 Giocato", f"{round(df_vis['Stake'].sum(), 2)} €")
+        m4.metric("📊 Match Chiusi", len(v_df) + len(p_df))
         
-        # Grafico Scalata 5000€
-        st.write(f"### 🚀 Scalata verso l'Obiettivo: {OBIETTIVO_TARGET}€")
+        # --- SIMULATORE PREDIZIONE ---
+        st.write("### 🔮 Analisi Predittiva Scalata")
         progresso = min(1.0, max(0.0, profitto_netto / OBIETTIVO_TARGET)) if profitto_netto > 0 else 0.0
         st.progress(progresso)
-        col_p1, col_p2 = st.columns([1, 1])
-        col_p1.caption(f"Progresso: {int(progresso*100)}%")
-        mancano = round(OBIETTIVO_TARGET - profitto_netto, 2)
-        col_p2.markdown(f"<p style='text-align:right;color:#00ff00;'>Mancano: {max(0.0, mancano)}€</p>", unsafe_allow_html=True)
+        
+        num_match = len(v_df) + len(p_df)
+        if num_match > 5:
+            profitto_medio = profitto_netto / num_match
+            if profitto_medio > 0:
+                match_mancanti = int((OBIETTIVO_TARGET - profitto_netto) / profitto_medio)
+                st.success(f"Basandosi sulle tue performance, mancano circa **{match_mancanti} match** per raggiungere i 5000€.")
+            else:
+                st.warning("Il profitto medio attuale è negativo. Mantieni la strategia Value per invertire il trend.")
+        else:
+            st.info("Servono almeno 5 match chiusi per generare una predizione statistica affidabile.")
         
         st.divider()
         c_exp, c_imp = st.columns(2)
         with c_exp:
             csv = df_attuale.to_csv(index=False).encode('utf-8')
-            st.download_button("📥 SCARICA BACKUP", data=csv, file_name=f"sniper_backup_{date.today()}.csv", use_container_width=True)
+            st.download_button("📥 BACKUP CSV", data=csv, file_name=f"sniper_v13.9_{date.today()}.csv", use_container_width=True)
         with c_imp:
-            up = st.file_uploader("Ripristina Backup", type="csv")
-            if up and st.button("🔄 CARICA CSV", use_container_width=True):
-                salva_db(pd.read_csv(up)); st.rerun()
+            up = st.file_uploader("Restore", type="csv")
+            if up and st.button("🔄 CARICA"): salva_db(pd.read_csv(up)); st.rerun()
         
         st.divider()
         def color_esito(row):
             if row['Esito'] == "VINTO": return ['background-color: rgba(40, 167, 69, 0.2)'] * len(row)
             if row['Esito'] == "PERSO": return ['background-color: rgba(220, 53, 69, 0.2)'] * len(row)
             return ['background-color: rgba(255, 193, 7, 0.2)'] * len(row)
-
-        st.write("### Storico Operazioni")
-        cols_ordine = ["Data Match", "Campionato", "Match", "Scelta", "Quota", "Stake", "Esito", "Profitto", "Risultato", "Bookmaker"]
-        st.dataframe(df_vis[cols_ordine].sort_index(ascending=False).style.apply(color_esito, axis=1), use_container_width=True)
-    else:
-        st.info("Nessun dato presente nel Fiscale.")
+        st.dataframe(df_vis.sort_index(ascending=False).style.apply(color_esito, axis=1), use_container_width=True)

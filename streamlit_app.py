@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from streamlit_gsheets import GSheetsConnection
 
 # --- CONFIGURAZIONE UI ---
-st.set_page_config(page_title="AI SNIPER V15.1.8 - FULL STYLE", layout="wide")
+st.set_page_config(page_title="AI SNIPER V15.1.9 - FISCALE FULL", layout="wide")
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 
@@ -87,7 +87,7 @@ with st.sidebar:
     soglia_valore = st.slider("Filtro Valore %", 0, 15, 3) / 100
 
 # --- INTERFACCIA PRINCIPALE ---
-st.title("🎯 AI SNIPER V15.1.8")
+st.title("🎯 AI SNIPER V15.1.9")
 df_attuale = carica_db()
 t1, t2, t3 = st.tabs(["🔍 SCANNER", "💼 PORTAFOGLIO", "📊 FISCALE"])
 
@@ -194,7 +194,7 @@ with t2:
                 if b2.button("PERSO ❌", key=f"l_{i}"): chiudi_gara(i, "PERSO", "MAN")
                 if b3.button("ELIMINA 🗑️", key=f"d_{i}"): salva_db(df_attuale.drop(i)); st.rerun()
 
-# --- TAB 3: FISCALE (COLORI RIPRISTINATI) ---
+# --- TAB 3: FISCALE ---
 with t3:
     if not df_attuale.empty:
         df_stats = df_attuale.copy()
@@ -203,24 +203,29 @@ with t3:
         
         p_netto = round(df_chiuse['Profitto'].sum(), 2)
         v_scommesso = round(df_chiuse['Stake'].sum(), 2)
-        v_incassato = round(df_chiuse[df_chiuse['Esito'] == "VINTO"]['Stake'].sum() + df_chiuse[df_chiuse['Esito'] == "VINTO"]['Profitto'].sum(), 2)
+        # CALCOLO TOTALE VINTO (Incasso Lordo)
+        v_vinte = df_chiuse[df_chiuse['Esito'] == "VINTO"]
+        t_incassato_lordo = round(v_vinte['Stake'].sum() + v_vinte['Profitto'].sum(), 2)
         roi_avg = round((p_netto/v_scommesso*100), 2) if v_scommesso > 0 else 0
 
         st.subheader("📈 Performance Generale")
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Profitto Netto", f"{p_netto} €", delta=f"{p_netto} €", delta_color="normal" if p_netto >= 0 else "inverse")
-        m2.metric("Win Rate", f"{round((len(df_chiuse[df_chiuse['Esito']=='VINTO'])/len(df_chiuse)*100),1) if len(df_chiuse)>0 else 0} %")
+        m2.metric("Win Rate", f"{round((len(v_vinte)/len(df_chiuse)*100),1) if len(df_chiuse)>0 else 0} %")
         m3.metric("Goal Target", f"{OBIETTIVO_TARGET} €")
-        m4.metric("Volume Scommesso", f"{v_scommesso} €")
+        m4.metric("Giocate Chiuse", len(df_chiuse))
+        
+        st.divider()
+        c_v1, c_v2, c_v3 = st.columns(3)
+        c_v1.metric("Volume Scommesso", f"{v_scommesso} €")
+        c_v2.metric("Totale Incassato", f"{t_incassato_lordo} €") # <--- AGGIUNTO QUI
+        c_v3.metric("ROI Medio", f"{roi_avg} %", delta=f"{roi_avg} %", delta_color="normal" if roi_avg >= 0 else "inverse")
 
-        # --- FUNZIONE COLORAZIONE RIGHE ---
+        # --- COLORAZIONE RIGHE ---
         def color_rows(row):
-            if row['Esito'] == 'VINTO':
-                return ['background-color: rgba(40, 167, 69, 0.3)'] * len(row)
-            elif row['Esito'] == 'PERSO':
-                return ['background-color: rgba(220, 53, 69, 0.3)'] * len(row)
-            elif row['Esito'] == 'Pendente':
-                return ['background-color: rgba(255, 193, 7, 0.2)'] * len(row)
+            if row['Esito'] == 'VINTO': return ['background-color: rgba(40, 167, 69, 0.3)'] * len(row)
+            elif row['Esito'] == 'PERSO': return ['background-color: rgba(220, 53, 69, 0.3)'] * len(row)
+            elif row['Esito'] == 'Pendente': return ['background-color: rgba(255, 193, 7, 0.2)'] * len(row)
             return [''] * len(row)
 
         st.divider()

@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, date
 from streamlit_gsheets import GSheetsConnection
 
 # --- CONFIGURAZIONE UI ---
-st.set_page_config(page_title="AI SNIPER V15.1 - PRO PORTFOLIO", layout="wide")
+st.set_page_config(page_title="AI SNIPER V15.1.1 - PORTFOLIO TOTALS", layout="wide")
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 
@@ -79,7 +79,7 @@ def chiudi_gara(idx, esito, risultato_score="-"):
         st.rerun()
 
 # --- INTERFACCIA ---
-st.title("🎯 AI SNIPER V15.1")
+st.title("🎯 AI SNIPER V15.1.1")
 df_attuale = carica_db()
 
 with st.sidebar:
@@ -144,9 +144,25 @@ with t1:
                         salva_db(pd.concat([df_attuale, nuova], ignore_index=True)); st.rerun()
             except: continue
 
-# --- TAB 2: PORTAFOGLIO (TESTATA AGGIORNATA) ---
+# --- TAB 2: PORTAFOGLIO (CON TOTALI) ---
 with t2:
-    df_p = df_attuale[df_attuale['Esito'] == "Pendente"]
+    df_p = df_attuale[df_attuale['Esito'] == "Pendente"].copy()
+    
+    if not df_p.empty:
+        # Calcolo Totali Portafoglio
+        df_p['Stake'] = pd.to_numeric(df_p['Stake'], errors='coerce').fillna(0)
+        df_p['Quota'] = pd.to_numeric(df_p['Quota'], errors='coerce').fillna(0)
+        
+        totale_scommesso = round(df_p['Stake'].sum(), 2)
+        totale_vincita_pot = round((df_p['Stake'] * df_p['Quota']).sum(), 2)
+        
+        # Mostra Metriche Totali
+        c_tot1, c_tot2 = st.columns(2)
+        c_tot1.metric("Totale Scommesso Portafoglio", f"{totale_scommesso} €")
+        c_tot2.metric("Possibile Vincita Totale", f"{totale_vincita_pot} €", delta=round(totale_vincita_pot - totale_scommesso, 2), delta_color="normal")
+        
+        st.divider()
+
     if st.button("🤖 FORZA SYNC RISULTATI", use_container_width=True, type="primary"):
         with st.spinner("Verifica esiti..."):
             unique_sports = df_p['Sport_Key'].unique()
@@ -168,9 +184,8 @@ with t2:
     
     if not df_p.empty:
         for i, r in df_p.iterrows():
-            vincita_pot = round(float(r['Stake']) * float(r['Quota']), 2)
-            # --- NUOVA TESTATA: Puntata e Vincita incluse ---
-            label_main = f"{r['Data Match']} | {r['Match']} | {r['Scelta']} | 🏦 {r['Bookmaker']} | Puntata: {r['Stake']}€ | 💰 Vincita: {vincita_pot}€"
+            vincita_singola = round(float(r['Stake']) * float(r['Quota']), 2)
+            label_main = f"{r['Data Match']} | {r['Match']} | {r['Scelta']} | 🏦 {r['Bookmaker']} | Stake: {r['Stake']}€ | Pot: {vincita_singola}€"
             
             with st.expander(label_main):
                 b1, b2, b3 = st.columns(3)

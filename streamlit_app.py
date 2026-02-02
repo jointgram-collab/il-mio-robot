@@ -2,11 +2,12 @@ import streamlit as st
 import pandas as pd
 import requests
 import time
+import io
 from datetime import datetime, timedelta
 from streamlit_gsheets import GSheetsConnection
 
 # --- CONFIGURAZIONE UI ---
-st.set_page_config(page_title="AI SNIPER V15.1.9 - FISCALE FULL", layout="wide")
+st.set_page_config(page_title="AI SNIPER V15.1.10 - FULL FISCAL & BACKUP", layout="wide")
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 
@@ -87,7 +88,7 @@ with st.sidebar:
     soglia_valore = st.slider("Filtro Valore %", 0, 15, 3) / 100
 
 # --- INTERFACCIA PRINCIPALE ---
-st.title("🎯 AI SNIPER V15.1.9")
+st.title("🎯 AI SNIPER V15.1.10")
 df_attuale = carica_db()
 t1, t2, t3 = st.tabs(["🔍 SCANNER", "💼 PORTAFOGLIO", "📊 FISCALE"])
 
@@ -187,14 +188,14 @@ with t2:
         for i, r in df_p.iterrows():
             camp_label = LEAGUE_NAMES.get(r['Sport_Key'], r['Sport_Key'])
             vinc_pot_sing = round(float(r['Stake']) * float(r['Quota']), 2)
-            label_main = f"{r['Data Match']} | {r['Match']} | **{camp_label}** | **{r['Scelta']}** | Stake: {r['Stake']}€ | Pot: {vinc_pot_sing}€"
+            label_main = f"{r['Data Match']} | {r['Match']} | **{camp_label}** | **{r['Scelta']}** | {r['Stake']}€"
             with st.expander(label_main):
                 b1, b2, b3 = st.columns(3)
                 if b1.button("VINTO ✅", key=f"w_{i}"): chiudi_gara(i, "VINTO", "MAN")
                 if b2.button("PERSO ❌", key=f"l_{i}"): chiudi_gara(i, "PERSO", "MAN")
                 if b3.button("ELIMINA 🗑️", key=f"d_{i}"): salva_db(df_attuale.drop(i)); st.rerun()
 
-# --- TAB 3: FISCALE ---
+# --- TAB 3: FISCALE & BACKUP ---
 with t3:
     if not df_attuale.empty:
         df_stats = df_attuale.copy()
@@ -203,7 +204,6 @@ with t3:
         
         p_netto = round(df_chiuse['Profitto'].sum(), 2)
         v_scommesso = round(df_chiuse['Stake'].sum(), 2)
-        # CALCOLO TOTALE VINTO (Incasso Lordo)
         v_vinte = df_chiuse[df_chiuse['Esito'] == "VINTO"]
         t_incassato_lordo = round(v_vinte['Stake'].sum() + v_vinte['Profitto'].sum(), 2)
         roi_avg = round((p_netto/v_scommesso*100), 2) if v_scommesso > 0 else 0
@@ -213,15 +213,35 @@ with t3:
         m1.metric("Profitto Netto", f"{p_netto} €", delta=f"{p_netto} €", delta_color="normal" if p_netto >= 0 else "inverse")
         m2.metric("Win Rate", f"{round((len(v_vinte)/len(df_chiuse)*100),1) if len(df_chiuse)>0 else 0} %")
         m3.metric("Goal Target", f"{OBIETTIVO_TARGET} €")
-        m4.metric("Giocate Chiuse", len(df_chiuse))
+        m4.metric("Volume Scommesso", f"{v_scommesso} €")
         
         st.divider()
         c_v1, c_v2, c_v3 = st.columns(3)
         c_v1.metric("Volume Scommesso", f"{v_scommesso} €")
-        c_v2.metric("Totale Incassato", f"{t_incassato_lordo} €") # <--- AGGIUNTO QUI
+        c_v2.metric("Totale Incassato", f"{t_incassato_lordo} €")
         c_v3.metric("ROI Medio", f"{roi_avg} %", delta=f"{roi_avg} %", delta_color="normal" if roi_avg >= 0 else "inverse")
 
-        # --- COLORAZIONE RIGHE ---
+        # --- SEZIONE BACKUP ---
+        st.divider()
+        st.subheader("💾 Gestione Backup")
+        bk1, bk2 = st.columns(2)
+        
+        with bk1:
+            st.write("**Esporta Database**")
+            csv = df_attuale.to_csv(index=False).encode('utf-8')
+            st.download_button("📥 Scarica Backup CSV", data=csv, file_name=f"backup_sniper_{datetime.now().strftime('%d_%m_%Y')}.csv", mime="text/csv", use_container_width=True)
+            
+        with bk2:
+            st.write("**Ripristina Database**")
+            uploaded_file = st.file_uploader("Carica file CSV per sovrascrivere il DB", type="csv")
+            if uploaded_file is not None:
+                if st.button("⚠️ CONFERMA RIPRISTINO", use_container_width=True):
+                    new_df = pd.read_csv(uploaded_file)
+                    salva_db(new_df)
+                    st.success("Database ripristinato con successo!")
+                    st.rerun()
+
+        # --- STORICO COLORATO ---
         def color_rows(row):
             if row['Esito'] == 'VINTO': return ['background-color: rgba(40, 167, 69, 0.3)'] * len(row)
             elif row['Esito'] == 'PERSO': return ['background-color: rgba(220, 53, 69, 0.3)'] * len(row)

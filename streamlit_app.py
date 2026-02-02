@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, date
 from streamlit_gsheets import GSheetsConnection
 
 # --- CONFIGURAZIONE UI ---
-st.set_page_config(page_title="AI SNIPER V15.0 - AUTO-SETTLE FIX", layout="wide")
+st.set_page_config(page_title="AI SNIPER V15.1 - PRO PORTFOLIO", layout="wide")
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 
@@ -79,7 +79,7 @@ def chiudi_gara(idx, esito, risultato_score="-"):
         st.rerun()
 
 # --- INTERFACCIA ---
-st.title("🎯 AI SNIPER V15.0")
+st.title("🎯 AI SNIPER V15.1")
 df_attuale = carica_db()
 
 with st.sidebar:
@@ -144,32 +144,24 @@ with t1:
                         salva_db(pd.concat([df_attuale, nuova], ignore_index=True)); st.rerun()
             except: continue
 
-# --- TAB 2: PORTAFOGLIO (FIXED CHECK) ---
+# --- TAB 2: PORTAFOGLIO (TESTATA AGGIORNATA) ---
 with t2:
     df_p = df_attuale[df_attuale['Esito'] == "Pendente"]
     if st.button("🤖 FORZA SYNC RISULTATI", use_container_width=True, type="primary"):
-        with st.spinner("Recupero esiti in corso..."):
-            # Raggruppiamo per sport per fare meno chiamate API
+        with st.spinner("Verifica esiti..."):
             unique_sports = df_p['Sport_Key'].unique()
             for s_key in unique_sports:
                 scores_data = chiamata_sicura_api(f"https://api.the-odds-api.com/v4/sports/{s_key}/scores/", {'daysFrom': 3})
                 if scores_data:
                     for idx, row in df_p[df_p['Sport_Key'] == s_key].iterrows():
-                        # Matching robusto (rimozione spazi e case insensitive)
                         m_res = next((s for s in scores_data if s['completed'] and 
                                      s['home_team'].strip().lower() in row['Match'].lower() and 
                                      s['away_team'].strip().lower() in row['Match'].lower()), None)
-                        
                         if m_res and m_res.get('scores'):
                             try:
-                                # Estrazione punteggi (gestione liste di score)
                                 sc_h = int(next(item['score'] for item in m_res['scores'] if item['name'] == m_res['home_team']))
                                 sc_a = int(next(item['score'] for item in m_res['scores'] if item['name'] == m_res['away_team']))
-                                total_goals = sc_h + sc_a
-                                
-                                vinto = (row['Scelta'] == "OVER 2.5" and total_goals > 2.5) or \
-                                        (row['Scelta'] == "UNDER 2.5" and total_goals < 2.5)
-                                
+                                vinto = (row['Scelta'] == "OVER 2.5" and (sc_h + sc_a) > 2.5) or (row['Scelta'] == "UNDER 2.5" and (sc_h + sc_a) < 2.5)
                                 chiudi_gara(idx, "VINTO" if vinto else "PERSO", f"{sc_h}-{sc_a}")
                             except: continue
         st.rerun()
@@ -177,7 +169,9 @@ with t2:
     if not df_p.empty:
         for i, r in df_p.iterrows():
             vincita_pot = round(float(r['Stake']) * float(r['Quota']), 2)
-            label_main = f"{r['Data Match']} | {r['Match']} | {r['Scelta']} | 🏦 {r['Bookmaker']} | 💰 {vincita_pot}€"
+            # --- NUOVA TESTATA: Puntata e Vincita incluse ---
+            label_main = f"{r['Data Match']} | {r['Match']} | {r['Scelta']} | 🏦 {r['Bookmaker']} | Puntata: {r['Stake']}€ | 💰 Vincita: {vincita_pot}€"
+            
             with st.expander(label_main):
                 b1, b2, b3 = st.columns(3)
                 if b1.button("VINTO ✅", key=f"w_{i}", use_container_width=True): chiudi_gara(i, "VINTO", "MAN")
@@ -186,23 +180,21 @@ with t2:
     else:
         st.info("Nessuna scommessa pendente.")
 
-# --- TAB 3: FISCALE (COLORI E STATISTICHE) ---
+# --- TAB 3: FISCALE ---
 with t3:
     if not df_attuale.empty:
         df_stats = df_attuale.copy()
         v_df = df_stats[df_stats['Esito'] == "VINTO"]
         p_df = df_stats[df_stats['Esito'] == "PERSO"]
         chiuse = len(v_df) + len(p_df)
-        
         profitto_netto = round(df_stats['Profitto'].sum(), 2)
         win_rate = round((len(v_df) / chiuse * 100), 1) if chiuse > 0 else 0
-        roi = round((profitto_netto / df_stats[df_stats['Esito'] != "Pendente"]['Stake'].sum() * 100), 1) if chiuse > 0 else 0
 
         st.subheader("📈 Performance Generale")
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Profitto Totale", f"{profitto_netto} €")
         m2.metric("Win Rate", f"{win_rate} %")
-        m3.metric("ROI", f"{roi} %")
+        m3.metric("Goal Target", f"{OBIETTIVO_TARGET} €")
         m4.metric("Giocate Chiuse", chiuse)
         
         st.divider()
@@ -216,5 +208,3 @@ with t3:
             return 'background-color: rgba(255, 193, 7, 0.2)'
 
         st.dataframe(df_stats.sort_index(ascending=False).style.applymap(color_esito, subset=['Esito']), use_container_width=True)
-        
-        st.download_button("📥 Scarica Report CSV", data=df_attuale.to_csv(index=False), file_name=f"sniper_report_{date.today()}.csv")

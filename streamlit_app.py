@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, date
 from streamlit_gsheets import GSheetsConnection
 
 # --- CONFIGURAZIONE UI ---
-st.set_page_config(page_title="AI SNIPER V14.9 - FULL STATS", layout="wide")
+st.set_page_config(page_title="AI SNIPER V15.0 - AUTO-SETTLE FIX", layout="wide")
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 
@@ -39,7 +39,7 @@ def chiamata_sicura_api(endpoint, params_extra={}):
     idx = st.session_state['api_usage'].get('active_index', 0)
     for _ in range(len(API_KEYS)):
         current_key = API_KEYS[idx]
-        params = {'api_key': current_key, 'regions': 'eu', 'markets': 'totals'}
+        params = {'api_key': current_key}
         params.update(params_extra)
         try:
             r = requests.get(endpoint, params=params)
@@ -79,7 +79,7 @@ def chiudi_gara(idx, esito, risultato_score="-"):
         st.rerun()
 
 # --- INTERFACCIA ---
-st.title("🎯 AI SNIPER V14.9")
+st.title("🎯 AI SNIPER V15.0")
 df_attuale = carica_db()
 
 with st.sidebar:
@@ -106,16 +106,11 @@ with t1:
         all_found = []
         pbar = st.progress(0)
         for idx, k in enumerate(LEAGUE_NAMES.keys()):
-            data = chiamata_sicura_api(f'https://api.the-odds-api.com/v4/sports/{k}/odds/')
+            data = chiamata_sicura_api(f'https://api.the-odds-api.com/v4/sports/{k}/odds/', {'regions': 'eu', 'markets': 'totals'})
             if data: all_found.extend(data)
             time.sleep(0.3)
             pbar.progress((idx + 1) / len(LEAGUE_NAMES))
         st.session_state['api_data'] = all_found
-        st.rerun()
-
-    if c_sing.button("🔍 SCAN SINGOLO", use_container_width=True):
-        data = chiamata_sicura_api(f'https://api.the-odds-api.com/v4/sports/{leagues[sel_name]}/odds/')
-        if data: st.session_state['api_data'] = data
         st.rerun()
 
     if st.session_state['api_data']:
@@ -149,19 +144,34 @@ with t1:
                         salva_db(pd.concat([df_attuale, nuova], ignore_index=True)); st.rerun()
             except: continue
 
-# --- TAB 2: PORTAFOGLIO ---
+# --- TAB 2: PORTAFOGLIO (FIXED CHECK) ---
 with t2:
     df_p = df_attuale[df_attuale['Esito'] == "Pendente"]
-    if st.button("🤖 AUTO-CHECK RISULTATI", use_container_width=True, type="primary"):
-        with st.spinner("Sincronizzazione..."):
-            for idx, row in df_p.iterrows():
-                data = chiamata_sicura_api(f"https://api.the-odds-api.com/v4/sports/{row['Sport_Key']}/scores/", {'daysFrom': 3})
-                if data:
-                    m_res = next((s for s in data if s['home_team'] in row['Match'] and s['completed']), None)
-                    if m_res:
-                        h, a = m_res['scores'][0]['score'], m_res['scores'][1]['score']
-                        vinto = (row['Scelta'] == "OVER 2.5" and (int(h)+int(a)) > 2.5) or (row['Scelta'] == "UNDER 2.5" and (int(h)+int(a)) < 2.5)
-                        chiudi_gara(idx, "VINTO" if vinto else "PERSO", f"{h}-{a}")
+    if st.button("🤖 FORZA SYNC RISULTATI", use_container_width=True, type="primary"):
+        with st.spinner("Recupero esiti in corso..."):
+            # Raggruppiamo per sport per fare meno chiamate API
+            unique_sports = df_p['Sport_Key'].unique()
+            for s_key in unique_sports:
+                scores_data = chiamata_sicura_api(f"https://api.the-odds-api.com/v4/sports/{s_key}/scores/", {'daysFrom': 3})
+                if scores_data:
+                    for idx, row in df_p[df_p['Sport_Key'] == s_key].iterrows():
+                        # Matching robusto (rimozione spazi e case insensitive)
+                        m_res = next((s for s in scores_data if s['completed'] and 
+                                     s['home_team'].strip().lower() in row['Match'].lower() and 
+                                     s['away_team'].strip().lower() in row['Match'].lower()), None)
+                        
+                        if m_res and m_res.get('scores'):
+                            try:
+                                # Estrazione punteggi (gestione liste di score)
+                                sc_h = int(next(item['score'] for item in m_res['scores'] if item['name'] == m_res['home_team']))
+                                sc_a = int(next(item['score'] for item in m_res['scores'] if item['name'] == m_res['away_team']))
+                                total_goals = sc_h + sc_a
+                                
+                                vinto = (row['Scelta'] == "OVER 2.5" and total_goals > 2.5) or \
+                                        (row['Scelta'] == "UNDER 2.5" and total_goals < 2.5)
+                                
+                                chiudi_gara(idx, "VINTO" if vinto else "PERSO", f"{sc_h}-{sc_a}")
+                            except: continue
         st.rerun()
     
     if not df_p.empty:
@@ -176,56 +186,35 @@ with t2:
     else:
         st.info("Nessuna scommessa pendente.")
 
-# --- TAB 3: FISCALE (POTENZIATO) ---
+# --- TAB 3: FISCALE (COLORI E STATISTICHE) ---
 with t3:
     if not df_attuale.empty:
-        # Calcolo Statistiche
         df_stats = df_attuale.copy()
         v_df = df_stats[df_stats['Esito'] == "VINTO"]
         p_df = df_stats[df_stats['Esito'] == "PERSO"]
-        pen_df = df_stats[df_stats['Esito'] == "Pendente"]
+        chiuse = len(v_df) + len(p_df)
         
-        chiuse_count = len(v_df) + len(p_df)
         profitto_netto = round(df_stats['Profitto'].sum(), 2)
-        win_rate = round((len(v_df) / chiuse_count * 100), 1) if chiuse_count > 0 else 0
-        roi = round((profitto_netto / df_stats[df_stats['Esito'] != "Pendente"]['Stake'].sum() * 100), 1) if chiuse_count > 0 else 0
-        
-        # Righe Metriche
+        win_rate = round((len(v_df) / chiuse * 100), 1) if chiuse > 0 else 0
+        roi = round((profitto_netto / df_stats[df_stats['Esito'] != "Pendente"]['Stake'].sum() * 100), 1) if chiuse > 0 else 0
+
         st.subheader("📈 Performance Generale")
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Profitto Totale", f"{profitto_netto} €")
         m2.metric("Win Rate", f"{win_rate} %")
         m3.metric("ROI", f"{roi} %")
-        m4.metric("Match Pendenti", len(pen_df))
+        m4.metric("Giocate Chiuse", chiuse)
         
-        # Barra Progresso Obiettivo
         st.divider()
         st.write(f"### 🚀 Scalata: {profitto_netto}€ / {OBIETTIVO_TARGET}€")
-        prog_val = min(1.0, max(0.0, profitto_netto / OBIETTIVO_TARGET)) if profitto_netto > 0 else 0.0
-        st.progress(prog_val)
+        st.progress(min(1.0, max(0.0, profitto_netto / OBIETTIVO_TARGET)) if profitto_netto > 0 else 0.0)
         
-        # Tabella con Colori
         st.write("### 📜 Storico Operazioni")
-        
-        def highlight_esito(row):
-            color = ''
-            if row.Esito == 'VINTO': color = 'background-color: rgba(40, 167, 69, 0.3)' # Verde
-            elif row.Esito == 'PERSO': color = 'background-color: rgba(220, 53, 69, 0.3)' # Rosso
-            elif row.Esito == 'Pendente': color = 'background-color: rgba(255, 193, 7, 0.2)' # Giallo/Ambra
-            return [color] * len(row)
+        def color_esito(val):
+            if val == 'VINTO': return 'background-color: rgba(40, 167, 69, 0.3)'
+            if val == 'PERSO': return 'background-color: rgba(220, 53, 69, 0.3)'
+            return 'background-color: rgba(255, 193, 7, 0.2)'
 
-        st.dataframe(
-            df_stats.sort_index(ascending=False).style.apply(highlight_esito, axis=1),
-            use_container_width=True,
-            height=400
-        )
+        st.dataframe(df_stats.sort_index(ascending=False).style.applymap(color_esito, subset=['Esito']), use_container_width=True)
         
-        # Download e Reset
-        st.divider()
-        c_dl, c_res = st.columns(2)
-        c_dl.download_button("📥 Scarica Report CSV", data=df_attuale.to_csv(index=False), file_name=f"sniper_report_{date.today()}.csv")
-        if c_res.button("🗑️ Svuota Database (Attenzione!)"):
-            if st.checkbox("Confermo la cancellazione totale"):
-                salva_db(pd.DataFrame(columns=df_attuale.columns)); st.rerun()
-    else:
-        st.info("Ancora nessun dato disponibile per le statistiche.")
+        st.download_button("📥 Scarica Report CSV", data=df_attuale.to_csv(index=False), file_name=f"sniper_report_{date.today()}.csv")

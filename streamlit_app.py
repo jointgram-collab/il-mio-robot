@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from streamlit_gsheets import GSheetsConnection
 
 # --- CONFIGURAZIONE UI ---
-st.set_page_config(page_title="AI SNIPER V15.1.12 - COMPLETE SUITE", layout="wide")
+st.set_page_config(page_title="AI SNIPER V15.1.13 - SORTED PORTFOLIO", layout="wide")
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 
@@ -88,11 +88,11 @@ with st.sidebar:
     soglia_valore = st.slider("Filtro Valore %", 0, 15, 3) / 100
 
 # --- INTERFACCIA PRINCIPALE ---
-st.title("🎯 AI SNIPER V15.1.12")
+st.title("🎯 AI SNIPER V15.1.13")
 df_attuale = carica_db()
 t1, t2, t3 = st.tabs(["🔍 SCANNER", "💼 PORTAFOGLIO", "📊 FISCALE"])
 
-# --- TAB 1: SCANNER (SMART DUPLICATE CHECK) ---
+# --- TAB 1: SCANNER ---
 with t1:
     leagues = {v: k for k, v in LEAGUE_NAMES.items()}
     c_sel, c_sing, c_all, c_ore = st.columns([1.5, 1, 1, 1])
@@ -117,9 +117,7 @@ with t1:
         st.rerun()
 
     if st.session_state['api_data']:
-        # Recupero match già in gioco
         pend_list = df_attuale[df_attuale['Esito'] == "Pendente"]['Match'].tolist()
-        
         for i, m in enumerate(st.session_state['api_data']):
             try:
                 nome_m = f"{m['home_team']}-{m['away_team']}"
@@ -142,8 +140,6 @@ with t1:
                     stk = round(max(2.0, min(budget_cassa * (best['V']/(best['Q']-1)) * rischio_kelly, budget_cassa*0.15)), 2)
                     c_a, c_b = st.columns([3, 1])
                     c_a.markdown(f"📅 {dt_m.strftime('%d/%m %H:%M')} | **{nome_m}**<br>🎯 **{best['T']}** @{best['Q']} | Val: {round(best['V']*100,1)}% | 🏦 {best['BK']}", unsafe_allow_html=True)
-                    
-                    # Logica controllo duplicato
                     if nome_m in pend_list:
                         c_b.button("✅", key=f"add_{i}", disabled=True, use_container_width=True)
                     elif c_b.button("ADD", key=f"add_{i}", use_container_width=True):
@@ -151,9 +147,10 @@ with t1:
                         salva_db(pd.concat([df_attuale, nuova], ignore_index=True)); st.rerun()
             except: continue
 
-# --- TAB 2: PORTAFOGLIO ---
+# --- TAB 2: PORTAFOGLIO (ORDINATO PER DATA RECENTE) ---
 with t2:
     df_p = df_attuale[df_attuale['Esito'] == "Pendente"].copy()
+    
     if st.button("🔄 CONTROLLO AUTOMATICO RISULTATI", use_container_width=True):
         with st.status("Verifica risultati..."):
             sport_attivi = df_p['Sport_Key'].unique()
@@ -176,19 +173,26 @@ with t2:
                                     df_attuale.at[idx, 'Profitto'] = round((s * q) - s, 2) if esito_final == "VINTO" else -s
                                     updates += 1
             if updates > 0: salva_db(df_attuale); st.rerun()
-            else: st.info("Nessun nuovo risultato trovato.")
 
     if not df_p.empty:
+        # LOGICA DI ORDINAMENTO: Dal più recente al meno recente
+        anno_c = datetime.now().year
+        df_p['dt_sort'] = pd.to_datetime(df_p['Data Match'] + f"/{anno_c}", format='%d/%m/%Y %H:%M', errors='coerce')
+        df_p = df_p.sort_values(by='dt_sort', ascending=False)
+
         df_p['Stake'] = pd.to_numeric(df_p['Stake'], errors='coerce').fillna(0)
         df_p['Quota'] = pd.to_numeric(df_p['Quota'], errors='coerce').fillna(0)
+        
         c_p1, c_p2 = st.columns(2)
         c_p1.metric("Stake in Gioco", f"{round(df_p['Stake'].sum(), 2)} €")
         c_p2.metric("Vincita Potenziale", f"{round((df_p['Stake'] * df_p['Quota']).sum(), 2)} €")
         st.divider()
+
         for i, r in df_p.iterrows():
             camp_label = LEAGUE_NAMES.get(r['Sport_Key'], r['Sport_Key'])
-            label_main = f"{r['Data Match']} | {r['Match']} | **{camp_label}** | **{r['Scelta']}** | {r['Stake']}€"
+            label_main = f"📅 {r['Data Match']} | {r['Match']} | **{camp_label}**"
             with st.expander(label_main):
+                st.write(f"🎯 **{r['Scelta']}** @{r['Quota']} | Stake: **{r['Stake']}€**")
                 b1, b2, b3 = st.columns(3)
                 if b1.button("VINTO ✅", key=f"w_{i}"): chiudi_gara(i, "VINTO", "MAN")
                 if b2.button("PERSO ❌", key=f"l_{i}"): chiudi_gara(i, "PERSO", "MAN")
@@ -205,22 +209,20 @@ with t3:
         v_scommesso = round(df_chiuse['Stake'].sum(), 2)
         v_vinte = df_chiuse[df_chiuse['Esito'] == "VINTO"]
         t_incassato_lordo = round(v_vinte['Stake'].sum() + v_vinte['Profitto'].sum(), 2)
-        roi_avg = round((p_netto/v_scommesso*100), 2) if v_scommesso > 0 else 0
-
-        st.subheader("📈 Performance")
+        
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Profitto Netto", f"{p_netto} €", delta=f"{p_netto} €")
         m2.metric("Incasso Lordo", f"{t_incassato_lordo} €")
-        m3.metric("Goal Target", f"{OBIETTIVO_TARGET} €")
-        m4.metric("ROI", f"{roi_avg} %")
+        m3.metric("Win Rate", f"{round((len(v_vinte)/len(df_chiuse)*100),1) if len(df_chiuse)>0 else 0} %")
+        m4.metric("ROI", f"{round((p_netto/v_scommesso*100),2) if v_scommesso>0 else 0} %")
 
         st.divider()
         st.subheader("💾 Backup")
         bk1, bk2 = st.columns(2)
-        with bk1: st.download_button("📥 Esporta Backup CSV", data=df_attuale.to_csv(index=False).encode('utf-8'), file_name=f"backup_sniper_{datetime.now().strftime('%d_%m')}.csv", use_container_width=True)
+        with bk1: st.download_button("📥 Backup CSV", data=df_attuale.to_csv(index=False).encode('utf-8'), file_name="backup.csv", use_container_width=True)
         with bk2:
-            up = st.file_uploader("Ripristina Database", type="csv")
-            if up and st.button("⚠️ CONFERMA OVERWRITE"): salva_db(pd.read_csv(up)); st.rerun()
+            up = st.file_uploader("Ripristina", type="csv")
+            if up and st.button("⚠️ CONFERMA"): salva_db(pd.read_csv(up)); st.rerun()
 
         def color_rows(row):
             if row['Esito'] == 'VINTO': return ['background-color: rgba(40, 167, 69, 0.3)'] * len(row)

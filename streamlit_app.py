@@ -6,14 +6,14 @@ from datetime import datetime, timedelta
 from streamlit_gsheets import GSheetsConnection
 
 # --- CONFIGURAZIONE UI ---
-st.set_page_config(page_title="AI SNIPER V15.1.6 - FULL SUITE", layout="wide")
+st.set_page_config(page_title="AI SNIPER V15.1.7 - AUTO-SYNC", layout="wide")
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# --- CONFIGURAZIONE COSTANTI E BUDGET ---
+# --- CONFIGURAZIONE COSTANTI ---
 API_KEYS = ['01f1c8f2a314814b17de03eeb6c53623', '55f08c25f38fa1006dd9e66282170e1a']
-BUDGET_DISPONIBILE = 500.0  # Budget di default
-OBIETTIVO_TARGET = 5000.0   # Target di profitto
+BUDGET_DISPONIBILE = 500.0 
+OBIETTIVO_TARGET = 5000.0   
 
 if 'api_usage' not in st.session_state:
     st.session_state['api_usage'] = {'remaining': "N/D", 'used': "N/D", 'active_index': 0}
@@ -77,18 +77,17 @@ def chiudi_gara(idx, esito, risultato_score="-"):
 # --- SIDEBAR ---
 with st.sidebar:
     st.header("📊 Sistema & API")
-    st.info(f"Slot API in uso: {st.session_state['api_usage']['active_index'] + 1}")
+    st.info(f"Slot API: {st.session_state['api_usage']['active_index'] + 1}")
     c1, c2 = st.columns(2)
     c1.metric("Residui", st.session_state['api_usage']['remaining'])
     c2.metric("Usati", st.session_state['api_usage']['used'])
     st.divider()
-    
     budget_cassa = st.number_input("Cassa (€)", value=BUDGET_DISPONIBILE)
     rischio_kelly = st.slider("Aggressività Kelly", 0.05, 0.50, 0.15)
     soglia_valore = st.slider("Filtro Valore %", 0, 15, 3) / 100
 
 # --- INTERFACCIA PRINCIPALE ---
-st.title("🎯 AI SNIPER V15.1.6")
+st.title("🎯 AI SNIPER V15.1.7")
 df_attuale = carica_db()
 t1, t2, t3 = st.tabs(["🔍 SCANNER", "💼 PORTAFOGLIO", "📊 FISCALE"])
 
@@ -117,7 +116,6 @@ with t1:
         st.rerun()
 
     if st.session_state['api_data']:
-        pend_list = df_attuale[df_attuale['Esito'] == "Pendente"]['Match'].tolist()
         for i, m in enumerate(st.session_state['api_data']):
             try:
                 nome_m = f"{m['home_team']}-{m['away_team']}"
@@ -140,39 +138,55 @@ with t1:
                     stk = round(max(2.0, min(budget_cassa * (best['V']/(best['Q']-1)) * rischio_kelly, budget_cassa*0.15)), 2)
                     c_a, c_b = st.columns([3, 1])
                     c_a.markdown(f"📅 {dt_m.strftime('%d/%m %H:%M')} | **{nome_m}**<br>🎯 **{best['T']}** @{best['Q']} | Val: {round(best['V']*100,1)}% | 🏦 {best['BK']}", unsafe_allow_html=True)
-                    if nome_m in pend_list:
-                        c_b.button("✅", key=f"add_{i}", disabled=True, use_container_width=True)
-                    elif c_b.button("ADD", key=f"add_{i}", use_container_width=True):
+                    if c_b.button("ADD", key=f"add_{i}", use_container_width=True):
                         nuova = pd.DataFrame([{"Data Match": dt_m.strftime('%d/%m %H:%M'), "Match": nome_m, "Scelta": best['T'], "Quota": best['Q'], "Stake": stk, "Bookmaker": best['BK'], "Esito": "Pendente", "Profitto": 0.0, "Sport_Key": m['sport_key'], "Risultato": "-"}])
                         salva_db(pd.concat([df_attuale, nuova], ignore_index=True)); st.rerun()
             except: continue
 
-# --- TAB 2: PORTAFOGLIO ---
+# --- TAB 2: PORTAFOGLIO (CON AUTO-SYNC) ---
 with t2:
     df_p = df_attuale[df_attuale['Esito'] == "Pendente"].copy()
-    if not df_p.empty:
-        df_p['Stake'] = pd.to_numeric(df_p['Stake'], errors='coerce').fillna(0)
-        df_p['Quota'] = pd.to_numeric(df_p['Quota'], errors='coerce').fillna(0)
-        t_scommesso = round(df_p['Stake'].sum(), 2)
-        t_vincita = round((df_p['Stake'] * df_p['Quota']).sum(), 2)
-        
-        c_p1, c_p2 = st.columns(2)
-        c_p1.metric("Stake in Gioco", f"{t_scommesso} €")
-        c_p2.metric("Vincita Potenziale", f"{t_vincita} €")
-        st.divider()
+    
+    # PULSANTE SYNC AUTOMATICO
+    if st.button("🔄 CONTROLLO AUTOMATICO RISULTATI", use_container_width=True):
+        with st.status("Verifica risultati in corso..."):
+            sport_attivi = df_p['Sport_Key'].unique()
+            updates = 0
+            for skey in sport_attivi:
+                res_data = chiamata_sicura_api(f'https://api.the-odds-api.com/v4/sports/{skey}/scores/', {'daysFrom': 3})
+                if res_data:
+                    for match_res in res_data:
+                        if match_res.get('completed'):
+                            m_name = f"{match_res['home_team']}-{match_res['away_team']}"
+                            scores = match_res.get('scores', [])
+                            if len(scores) == 2:
+                                tot = int(scores[0]['score']) + int(scores[1]['score'])
+                                final_s = f"{scores[0]['score']}-{scores[1]['score']}"
+                                
+                                for idx, row in df_p[df_p['Match'] == m_name].iterrows():
+                                    esito_final = "VINTO" if (tot > 2.5 and "OVER" in row['Scelta']) or (tot < 2.5 and "UNDER" in row['Scelta']) else "PERSO"
+                                    df_attuale.at[idx, 'Esito'] = esito_final
+                                    df_attuale.at[idx, 'Risultato'] = final_s
+                                    q, s = float(row['Quota']), float(row['Stake'])
+                                    df_attuale.at[idx, 'Profitto'] = round((s * q) - s, 2) if esito_final == "VINTO" else -s
+                                    updates += 1
+            if updates > 0:
+                salva_db(df_attuale)
+                st.success(f"Aggiornate {updates} partite!")
+                st.rerun()
+            else:
+                st.info("Nessun nuovo risultato trovato.")
 
+    if not df_p.empty:
+        st.divider()
         for i, r in df_p.iterrows():
             camp_label = LEAGUE_NAMES.get(r['Sport_Key'], r['Sport_Key'])
-            vinc_pot = round(float(r['Stake']) * float(r['Quota']), 2)
-            label_main = f"{r['Data Match']} | {r['Match']} | **{camp_label}** | **{r['Scelta']}** | Stake: {r['Stake']}€ | Pot: {vinc_pot}€"
-            
+            label_main = f"{r['Data Match']} | {r['Match']} | **{camp_label}** | **{r['Scelta']}** | {r['Stake']}€"
             with st.expander(label_main):
                 b1, b2, b3 = st.columns(3)
-                if b1.button("VINTO ✅", key=f"w_{i}", use_container_width=True): chiudi_gara(i, "VINTO", "MAN")
-                if b2.button("PERSO ❌", key=f"l_{i}", use_container_width=True): chiudi_gara(i, "PERSO", "MAN")
-                if b3.button("ELIMINA 🗑️", key=f"d_{i}", use_container_width=True): salva_db(df_attuale.drop(i)); st.rerun()
-    else:
-        st.info("Nessuna scommessa pendente.")
+                if b1.button("VINTO ✅", key=f"w_{i}"): chiudi_gara(i, "VINTO", "MAN")
+                if b2.button("PERSO ❌", key=f"l_{i}"): chiudi_gara(i, "PERSO", "MAN")
+                if b3.button("ELIMINA 🗑️", key=f"d_{i}"): salva_db(df_attuale.drop(i)); st.rerun()
 
 # --- TAB 3: FISCALE ---
 with t3:
@@ -183,20 +197,12 @@ with t3:
         
         p_netto = round(df_chiuse['Profitto'].sum(), 2)
         v_scommesso = round(df_chiuse['Stake'].sum(), 2)
-        v_incassato = round(df_chiuse[df_chiuse['Esito'] == "VINTO"]['Stake'].sum() + df_chiuse[df_chiuse['Esito'] == "VINTO"]['Profitto'].sum(), 2)
         roi_avg = round((p_netto/v_scommesso*100), 2) if v_scommesso > 0 else 0
 
-        st.subheader("📈 Performance Generale")
-        m1, m2, m3, m4 = st.columns(4)
+        m1, m2, m3 = st.columns(3)
         m1.metric("Profitto Netto", f"{p_netto} €", delta=f"{p_netto} €", delta_color="normal" if p_netto >= 0 else "inverse")
-        m2.metric("Win Rate", f"{round((len(df_chiuse[df_chiuse['Esito']=='VINTO'])/len(df_chiuse)*100),1) if len(df_chiuse)>0 else 0} %")
-        m3.metric("Goal Target", f"{OBIETTIVO_TARGET} €")
-        m4.metric("Giocate Chiuse", len(df_chiuse))
+        m2.metric("ROI", f"{roi_avg} %", delta=f"{roi_avg} %", delta_color="normal" if roi_avg >= 0 else "inverse")
+        m3.metric("Volume", f"{v_scommesso} €")
         
-        c_v1, c_v2, c_v3 = st.columns(3)
-        c_v1.metric("Volume Scommesso", f"{v_scommesso} €")
-        c_v2.metric("Totale Incassato", f"{v_incassato} €")
-        c_v3.metric("ROI Medio", f"{roi_avg} %", delta=f"{roi_avg} %", delta_color="normal" if roi_avg >= 0 else "inverse")
-
         st.divider()
         st.dataframe(df_stats.sort_index(ascending=False), use_container_width=True)

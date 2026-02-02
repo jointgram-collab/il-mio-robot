@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from streamlit_gsheets import GSheetsConnection
 
 # --- CONFIGURAZIONE UI ---
-st.set_page_config(page_title="AI SNIPER V15.1.10 - FULL FISCAL & BACKUP", layout="wide")
+st.set_page_config(page_title="AI SNIPER V15.1.12 - COMPLETE SUITE", layout="wide")
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 
@@ -78,7 +78,7 @@ def chiudi_gara(idx, esito, risultato_score="-"):
 # --- SIDEBAR ---
 with st.sidebar:
     st.header("📊 Sistema & API")
-    st.info(f"Slot API: {st.session_state['api_usage']['active_index'] + 1}")
+    st.info(f"Slot API in uso: {st.session_state['api_usage']['active_index'] + 1}")
     c1, c2 = st.columns(2)
     c1.metric("Residui", st.session_state['api_usage']['remaining'])
     c2.metric("Usati", st.session_state['api_usage']['used'])
@@ -88,11 +88,11 @@ with st.sidebar:
     soglia_valore = st.slider("Filtro Valore %", 0, 15, 3) / 100
 
 # --- INTERFACCIA PRINCIPALE ---
-st.title("🎯 AI SNIPER V15.1.10")
+st.title("🎯 AI SNIPER V15.1.12")
 df_attuale = carica_db()
 t1, t2, t3 = st.tabs(["🔍 SCANNER", "💼 PORTAFOGLIO", "📊 FISCALE"])
 
-# --- TAB 1: SCANNER ---
+# --- TAB 1: SCANNER (SMART DUPLICATE CHECK) ---
 with t1:
     leagues = {v: k for k, v in LEAGUE_NAMES.items()}
     c_sel, c_sing, c_all, c_ore = st.columns([1.5, 1, 1, 1])
@@ -117,6 +117,9 @@ with t1:
         st.rerun()
 
     if st.session_state['api_data']:
+        # Recupero match già in gioco
+        pend_list = df_attuale[df_attuale['Esito'] == "Pendente"]['Match'].tolist()
+        
         for i, m in enumerate(st.session_state['api_data']):
             try:
                 nome_m = f"{m['home_team']}-{m['away_team']}"
@@ -139,7 +142,11 @@ with t1:
                     stk = round(max(2.0, min(budget_cassa * (best['V']/(best['Q']-1)) * rischio_kelly, budget_cassa*0.15)), 2)
                     c_a, c_b = st.columns([3, 1])
                     c_a.markdown(f"📅 {dt_m.strftime('%d/%m %H:%M')} | **{nome_m}**<br>🎯 **{best['T']}** @{best['Q']} | Val: {round(best['V']*100,1)}% | 🏦 {best['BK']}", unsafe_allow_html=True)
-                    if c_b.button("ADD", key=f"add_{i}", use_container_width=True):
+                    
+                    # Logica controllo duplicato
+                    if nome_m in pend_list:
+                        c_b.button("✅", key=f"add_{i}", disabled=True, use_container_width=True)
+                    elif c_b.button("ADD", key=f"add_{i}", use_container_width=True):
                         nuova = pd.DataFrame([{"Data Match": dt_m.strftime('%d/%m %H:%M'), "Match": nome_m, "Scelta": best['T'], "Quota": best['Q'], "Stake": stk, "Bookmaker": best['BK'], "Esito": "Pendente", "Profitto": 0.0, "Sport_Key": m['sport_key'], "Risultato": "-"}])
                         salva_db(pd.concat([df_attuale, nuova], ignore_index=True)); st.rerun()
             except: continue
@@ -147,9 +154,8 @@ with t1:
 # --- TAB 2: PORTAFOGLIO ---
 with t2:
     df_p = df_attuale[df_attuale['Esito'] == "Pendente"].copy()
-    
     if st.button("🔄 CONTROLLO AUTOMATICO RISULTATI", use_container_width=True):
-        with st.status("Verifica risultati in corso..."):
+        with st.status("Verifica risultati..."):
             sport_attivi = df_p['Sport_Key'].unique()
             updates = 0
             for skey in sport_attivi:
@@ -169,25 +175,18 @@ with t2:
                                     q, s = float(row['Quota']), float(row['Stake'])
                                     df_attuale.at[idx, 'Profitto'] = round((s * q) - s, 2) if esito_final == "VINTO" else -s
                                     updates += 1
-            if updates > 0:
-                salva_db(df_attuale); st.rerun()
-            else:
-                st.info("Nessun nuovo risultato trovato.")
+            if updates > 0: salva_db(df_attuale); st.rerun()
+            else: st.info("Nessun nuovo risultato trovato.")
 
     if not df_p.empty:
         df_p['Stake'] = pd.to_numeric(df_p['Stake'], errors='coerce').fillna(0)
         df_p['Quota'] = pd.to_numeric(df_p['Quota'], errors='coerce').fillna(0)
-        t_scommesso_p = round(df_p['Stake'].sum(), 2)
-        t_vincita_p = round((df_p['Stake'] * df_p['Quota']).sum(), 2)
-        
         c_p1, c_p2 = st.columns(2)
-        c_p1.metric("Stake in Gioco", f"{t_scommesso_p} €")
-        c_p2.metric("Vincita Potenziale", f"{t_vincita_p} €")
+        c_p1.metric("Stake in Gioco", f"{round(df_p['Stake'].sum(), 2)} €")
+        c_p2.metric("Vincita Potenziale", f"{round((df_p['Stake'] * df_p['Quota']).sum(), 2)} €")
         st.divider()
-
         for i, r in df_p.iterrows():
             camp_label = LEAGUE_NAMES.get(r['Sport_Key'], r['Sport_Key'])
-            vinc_pot_sing = round(float(r['Stake']) * float(r['Quota']), 2)
             label_main = f"{r['Data Match']} | {r['Match']} | **{camp_label}** | **{r['Scelta']}** | {r['Stake']}€"
             with st.expander(label_main):
                 b1, b2, b3 = st.columns(3)
@@ -208,40 +207,21 @@ with t3:
         t_incassato_lordo = round(v_vinte['Stake'].sum() + v_vinte['Profitto'].sum(), 2)
         roi_avg = round((p_netto/v_scommesso*100), 2) if v_scommesso > 0 else 0
 
-        st.subheader("📈 Performance Generale")
+        st.subheader("📈 Performance")
         m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Profitto Netto", f"{p_netto} €", delta=f"{p_netto} €", delta_color="normal" if p_netto >= 0 else "inverse")
-        m2.metric("Win Rate", f"{round((len(v_vinte)/len(df_chiuse)*100),1) if len(df_chiuse)>0 else 0} %")
+        m1.metric("Profitto Netto", f"{p_netto} €", delta=f"{p_netto} €")
+        m2.metric("Incasso Lordo", f"{t_incassato_lordo} €")
         m3.metric("Goal Target", f"{OBIETTIVO_TARGET} €")
-        m4.metric("Volume Scommesso", f"{v_scommesso} €")
-        
-        st.divider()
-        c_v1, c_v2, c_v3 = st.columns(3)
-        c_v1.metric("Volume Scommesso", f"{v_scommesso} €")
-        c_v2.metric("Totale Incassato", f"{t_incassato_lordo} €")
-        c_v3.metric("ROI Medio", f"{roi_avg} %", delta=f"{roi_avg} %", delta_color="normal" if roi_avg >= 0 else "inverse")
+        m4.metric("ROI", f"{roi_avg} %")
 
-        # --- SEZIONE BACKUP ---
         st.divider()
-        st.subheader("💾 Gestione Backup")
+        st.subheader("💾 Backup")
         bk1, bk2 = st.columns(2)
-        
-        with bk1:
-            st.write("**Esporta Database**")
-            csv = df_attuale.to_csv(index=False).encode('utf-8')
-            st.download_button("📥 Scarica Backup CSV", data=csv, file_name=f"backup_sniper_{datetime.now().strftime('%d_%m_%Y')}.csv", mime="text/csv", use_container_width=True)
-            
+        with bk1: st.download_button("📥 Esporta Backup CSV", data=df_attuale.to_csv(index=False).encode('utf-8'), file_name=f"backup_sniper_{datetime.now().strftime('%d_%m')}.csv", use_container_width=True)
         with bk2:
-            st.write("**Ripristina Database**")
-            uploaded_file = st.file_uploader("Carica file CSV per sovrascrivere il DB", type="csv")
-            if uploaded_file is not None:
-                if st.button("⚠️ CONFERMA RIPRISTINO", use_container_width=True):
-                    new_df = pd.read_csv(uploaded_file)
-                    salva_db(new_df)
-                    st.success("Database ripristinato con successo!")
-                    st.rerun()
+            up = st.file_uploader("Ripristina Database", type="csv")
+            if up and st.button("⚠️ CONFERMA OVERWRITE"): salva_db(pd.read_csv(up)); st.rerun()
 
-        # --- STORICO COLORATO ---
         def color_rows(row):
             if row['Esito'] == 'VINTO': return ['background-color: rgba(40, 167, 69, 0.3)'] * len(row)
             elif row['Esito'] == 'PERSO': return ['background-color: rgba(220, 53, 69, 0.3)'] * len(row)
@@ -249,5 +229,4 @@ with t3:
             return [''] * len(row)
 
         st.divider()
-        st.write("### 📜 Storico Operazioni")
         st.dataframe(df_stats.sort_index(ascending=False).style.apply(color_rows, axis=1), use_container_width=True)

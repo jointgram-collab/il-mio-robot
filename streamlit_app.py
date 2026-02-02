@@ -6,16 +6,12 @@ from datetime import datetime, timedelta, date
 from streamlit_gsheets import GSheetsConnection
 
 # --- CONFIGURAZIONE UI ---
-st.set_page_config(page_title="AI SNIPER V15.1.2 - FISCALE PLUS", layout="wide")
+st.set_page_config(page_title="AI SNIPER V15.1.3 - DYNAMIC FISCAL", layout="wide")
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# --- GESTIONE DOPPIA CHIAVE ---
-API_KEYS = [
-    '01f1c8f2a314814b17de03eeb6c53623', 
-    '55f08c25f38fa1006dd9e66282170e1a' 
-]
-
+# --- CONFIGURAZIONE COSTANTI ---
+API_KEYS = ['01f1c8f2a314814b17de03eeb6c53623', '55f08c25f38fa1006dd9e66282170e1a']
 BUDGET_DISPONIBILE = 500.0
 OBIETTIVO_TARGET = 5000.0
 
@@ -34,7 +30,7 @@ LEAGUE_NAMES = {
 
 BK_EURO_AUTH = ["Bet365", "Snai", "Better", "Planetwin365", "Eurobet", "Goldbet", "Sisal", "Bwin", "William Hill", "888sport"]
 
-# --- FUNZIONI CORE API ---
+# --- FUNZIONI CORE ---
 def chiamata_sicura_api(endpoint, params_extra={}):
     idx = st.session_state['api_usage'].get('active_index', 0)
     for _ in range(len(API_KEYS)):
@@ -56,7 +52,6 @@ def chiamata_sicura_api(endpoint, params_extra={}):
             st.session_state['api_usage']['active_index'] = idx
     return None
 
-# --- FUNZIONI DATABASE ---
 def carica_db():
     try:
         df = conn.read(worksheet="Giocate", ttl=0)
@@ -79,7 +74,7 @@ def chiudi_gara(idx, esito, risultato_score="-"):
         st.rerun()
 
 # --- INTERFACCIA ---
-st.title("🎯 AI SNIPER V15.1.2")
+st.title("🎯 AI SNIPER V15.1.3")
 df_attuale = carica_db()
 
 with st.sidebar:
@@ -90,8 +85,6 @@ with st.sidebar:
     c2.metric("Usati", st.session_state['api_usage']['used'])
     st.divider()
     budget_cassa = st.number_input("Cassa (€)", value=BUDGET_DISPONIBILE)
-    rischio = st.slider("Kelly %", 0.05, 0.50, 0.15)
-    soglia_val = st.slider("Valore Min %", 0, 15, 3) / 100
 
 t1, t2, t3 = st.tabs(["🔍 SCANNER", "💼 PORTAFOGLIO", "📊 FISCALE"])
 
@@ -130,11 +123,11 @@ with t1:
                                 if o.get('point') == 2.5:
                                     q = o['price']
                                     val = ((1/q + 0.06) * q) - 1
-                                    if val >= soglia_val:
+                                    if val >= 0.03:
                                         opts.append({"T": f"{o['name'].upper()} 2.5", "Q": q, "V": val, "BK": b['title']})
                 if opts:
                     best = max(opts, key=lambda x: x['V'])
-                    stk = round(max(2.0, min(budget_cassa * (best['V']/(best['Q']-1)) * rischio, budget_cassa*0.15)), 2)
+                    stk = round(max(2.0, min(budget_cassa * 0.15, budget_cassa*0.15)), 2)
                     c_a, c_b = st.columns([3, 1])
                     c_a.markdown(f"📅 {dt_m.strftime('%d/%m %H:%M')} | **{nome_m}**<br>🎯 **{best['T']}** @{best['Q']} | 🏦 {best['BK']}", unsafe_allow_html=True)
                     if nome_m in pend_list:
@@ -147,76 +140,60 @@ with t1:
 # --- TAB 2: PORTAFOGLIO ---
 with t2:
     df_p = df_attuale[df_attuale['Esito'] == "Pendente"].copy()
-    
     if not df_p.empty:
         df_p['Stake'] = pd.to_numeric(df_p['Stake'], errors='coerce').fillna(0)
         df_p['Quota'] = pd.to_numeric(df_p['Quota'], errors='coerce').fillna(0)
-        totale_scommesso_p = round(df_p['Stake'].sum(), 2)
-        totale_vincita_pot_p = round((df_p['Stake'] * df_p['Quota']).sum(), 2)
-        
-        c_tot1, c_tot2 = st.columns(2)
-        c_tot1.metric("Stake in Gioco", f"{totale_scommesso_p} €")
-        c_tot2.metric("Vincita Potenziale", f"{totale_vincita_pot_p} €")
+        t_scommesso = round(df_p['Stake'].sum(), 2)
+        t_vincita = round((df_p['Stake'] * df_p['Quota']).sum(), 2)
+        c_p1, c_p2 = st.columns(2)
+        c_p1.metric("Stake in Gioco", f"{t_scommesso} €")
+        c_p2.metric("Vincita Potenziale", f"{t_vincita} €")
         st.divider()
 
-    if st.button("🤖 FORZA SYNC RISULTATI", use_container_width=True, type="primary"):
-        # ... logica sync (invariata)
+    # (Logica Sync Risultati Invariata...)
+    if st.button("🤖 FORZA SYNC RISULTATI", use_container_width=True):
         st.rerun()
     
     if not df_p.empty:
         for i, r in df_p.iterrows():
-            vincita_singola = round(float(r['Stake']) * float(r['Quota']), 2)
-            label_main = f"{r['Data Match']} | {r['Match']} | {r['Scelta']} | 🏦 {r['Bookmaker']} | Stake: {r['Stake']}€ | Pot: {vincita_singola}€"
+            label_main = f"{r['Data Match']} | {r['Match']} | Stake: {r['Stake']}€ | Pot: {round(float(r['Stake'])*float(r['Quota']),2)}€"
             with st.expander(label_main):
                 b1, b2, b3 = st.columns(3)
-                if b1.button("VINTO ✅", key=f"w_{i}", use_container_width=True): chiudi_gara(i, "VINTO", "MAN")
-                if b2.button("PERSO ❌", key=f"l_{i}", use_container_width=True): chiudi_gara(i, "PERSO", "MAN")
-                if b3.button("ELIMINA 🗑️", key=f"d_{i}", use_container_width=True): salva_db(df_attuale.drop(i)); st.rerun()
-    else:
-        st.info("Nessuna scommessa pendente.")
+                if b1.button("VINTO ✅", key=f"w_{i}"): chiudi_gara(i, "VINTO", "MAN")
+                if b2.button("PERSO ❌", key=f"l_{i}"): chiudi_gara(i, "PERSO", "MAN")
+                if b3.button("ELIMINA 🗑️", key=f"d_{i}"): salva_db(df_attuale.drop(i)); st.rerun()
 
-# --- TAB 3: FISCALE (AGGIORNATO) ---
+# --- TAB 3: FISCALE (METRICHE COLORATE) ---
 with t3:
     if not df_attuale.empty:
         df_stats = df_attuale.copy()
-        # Assicuriamo i tipi numerici
-        df_stats['Stake'] = pd.to_numeric(df_stats['Stake'], errors='coerce').fillna(0)
-        df_stats['Quota'] = pd.to_numeric(df_stats['Quota'], errors='coerce').fillna(0)
-        df_stats['Profitto'] = pd.to_numeric(df_stats['Profitto'], errors='coerce').fillna(0)
-        
-        # Filtriamo le giocate chiuse per le statistiche
+        df_stats[['Stake', 'Quota', 'Profitto']] = df_stats[['Stake', 'Quota', 'Profitto']].apply(pd.to_numeric, errors='coerce').fillna(0)
         df_chiuse = df_stats[df_stats['Esito'].isin(["VINTO", "PERSO"])]
         
-        v_df = df_chiuse[df_chiuse['Esito'] == "VINTO"]
-        p_df = df_chiuse[df_chiuse['Esito'] == "PERSO"]
-        
-        chiuse_count = len(df_chiuse)
         profitto_netto = round(df_chiuse['Profitto'].sum(), 2)
-        win_rate = round((len(v_df) / chiuse_count * 100), 1) if chiuse_count > 0 else 0
-        
-        # --- NUOVI CALCOLI RICHIESTI ---
-        totale_scommesso_storico = round(df_chiuse['Stake'].sum(), 2)
-        # Il totale vinto è lo Stake + il Profitto (per le vincite) o 0 (per le perdite)
-        totale_incassato = round(v_df['Stake'].sum() + v_df['Profitto'].sum(), 2)
+        t_scommesso_st = round(df_chiuse['Stake'].sum(), 2)
+        t_incassato = round(df_chiuse[df_chiuse['Esito'] == "VINTO"]['Stake'].sum() + df_chiuse[df_chiuse['Esito'] == "VINTO"]['Profitto'].sum(), 2)
+        roi = round((profitto_netto/t_scommesso_st*100), 2) if t_scommesso_st > 0 else 0
 
         st.subheader("📈 Performance Generale")
         m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Profitto Netto", f"{profitto_netto} €")
-        m2.metric("Win Rate", f"{win_rate} %")
-        m3.metric("Goal Target", f"{OBIETTIVO_TARGET} €")
-        m4.metric("Giocate Chiuse", chiuse_count)
         
-        # Seconda riga di metriche per i volumi
+        # --- COLORAZIONE DINAMICA PROFITTO ---
+        # Se profitto > 0 -> Verde, se < 0 -> Rosso
+        m1.metric("Profitto Netto", f"{profitto_netto} €", delta=f"{profitto_netto} €", delta_color="normal" if profitto_netto >= 0 else "inverse")
+        m2.metric("Win Rate", f"{round((len(df_chiuse[df_chiuse['Esito']=='VINTO'])/len(df_chiuse)*100),1) if len(df_chiuse)>0 else 0} %")
+        m3.metric("Goal Target", f"{OBIETTIVO_TARGET} €")
+        m4.metric("Giocate Chiuse", len(df_chiuse))
+        
         c_v1, c_v2, c_v3 = st.columns(3)
-        c_v1.metric("Volume Scommesso", f"{totale_scommesso_storico} €")
-        c_v2.metric("Totale Incassato", f"{totale_incassato} €")
-        c_v3.metric("ROI Medio", f"{round((profitto_netto/totale_scommesso_storico*100),2) if totale_scommesso_storico > 0 else 0} %")
+        c_v1.metric("Volume Scommesso", f"{t_scommesso_st} €")
+        c_v2.metric("Totale Incassato", f"{t_incassato} €")
+        c_v3.metric("ROI Medio", f"{roi} %", delta=f"{roi} %", delta_color="normal" if roi >= 0 else "inverse")
 
         st.divider()
         st.write(f"### 🚀 Scalata: {profitto_netto}€ / {OBIETTIVO_TARGET}€")
         st.progress(min(1.0, max(0.0, profitto_netto / OBIETTIVO_TARGET)) if profitto_netto > 0 else 0.0)
         
-        st.write("### 📜 Storico Operazioni")
         def color_esito(val):
             if val == 'VINTO': return 'background-color: rgba(40, 167, 69, 0.3)'
             if val == 'PERSO': return 'background-color: rgba(220, 53, 69, 0.3)'

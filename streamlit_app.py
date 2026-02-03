@@ -11,7 +11,6 @@ st.set_page_config(page_title="AI SNIPER V15.1.12 - STABILE AGGIORNATA", layout=
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 # --- CONFIGURAZIONE COSTANTI ---
-# Uso i dati salvati: Budget 500€ e Target 5000€
 API_KEYS = ['01f1c8f2a314814b17de03eeb6c53623', '55f08c25f38fa1006dd9e66282170e1a']
 BUDGET_DEFAULT = 500.0 
 OBIETTIVO_TARGET = 5000.0   
@@ -121,12 +120,11 @@ with t1:
                                         opts.append({"T": f"{o['name'].upper()} 2.5", "Q": q, "V": val, "BK": b['title']})
                 if opts:
                     best = max(opts, key=lambda x: x['V'])
-                    # --- CALCOLO STAKE ---
                     stk = round(max(2.0, min(budget_cassa * (best['V']/(best['Q']-1)) * rischio_kelly, budget_cassa*0.15)), 2)
                     
                     c_a, c_b = st.columns([3, 1])
-                    # MODIFICA: Stake visibile accanto al match
-                    c_a.markdown(f"📅 {dt_m.strftime('%d/%m %H:%M')} | **{nome_m}** | 💰 Stake: **{stk}€**<br>🎯 **{best['T']}** @{best['Q']} | Valore: {round(best['V']*100,1)}% | 🏦 {best['BK']}", unsafe_allow_html=True)
+                    # MODIFICA: Importo da scommettere visibile accanto al match
+                    c_a.markdown(f"📅 {dt_m.strftime('%d/%m %H:%M')} | **{nome_m}** | 💸 Importo: **{stk}€**<br>🎯 **{best['T']}** @{best['Q']} | Valore: {round(best['V']*100,1)}% | 🏦 {best['BK']}", unsafe_allow_html=True)
                     
                     if nome_m in pend_list:
                         c_b.button("✅", key=f"add_{i}", disabled=True, use_container_width=True)
@@ -154,16 +152,17 @@ with t3:
         df_chiuse = df_stats[df_stats['Esito'].isin(["VINTO", "PERSO"])]
         
         p_netto = round(df_chiuse['Profitto'].sum(), 2)
-        # --- CALCOLO VINCITA LORDA TOTALE ---
         v_vinte = df_chiuse[df_chiuse['Esito'] == "VINTO"]
         vincita_lorda = round(v_vinte['Stake'].sum() + v_vinte['Profitto'].sum(), 2)
+        # MODIFICA: Totale scommesso (volume di gioco)
+        totale_scommesso = round(df_chiuse['Stake'].sum(), 2)
 
         st.subheader("📈 Resoconto Fiscale")
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Profitto Netto", f"{p_netto} €")
-        m2.metric("Vincita Lorda Totale", f"{vincita_lorda} €") # Nuova Metrica
-        m3.metric("Goal Target", f"{OBIETTIVO_TARGET} €")
-        m4.metric("ROI %", f"{round((p_netto/df_chiuse['Stake'].sum()*100),2) if not df_chiuse.empty else 0}%")
+        m2.metric("Totale Scommesso", f"{totale_scommesso} €") # Nuova Metrica
+        m3.metric("Vincita Lorda", f"{vincita_lorda} €")
+        m4.metric("ROI %", f"{round((p_netto/totale_scommesso*100),2) if totale_scommesso>0 else 0}%")
 
         st.divider()
         st.subheader("💾 Backup & Ripristino")

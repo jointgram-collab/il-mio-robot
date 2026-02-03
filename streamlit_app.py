@@ -10,9 +10,7 @@ st.set_page_config(page_title="AI SNIPER V15.1.12 - STABILE", layout="wide")
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# --- COSTANTI UTENTE ---
-# La versione stabile è la v.15.1.12
-# Budget default: 500€ | Target: 5000€
+# --- COSTANTI (Budget 500€ / Target 5000€) ---
 API_KEYS = ['01f1c8f2a314814b17de03eeb6c53623', '55f08c25f38fa1006dd9e66282170e1a']
 BUDGET_DISPONIBILE = 500.0 
 OBIETTIVO_TARGET = 5000.0   
@@ -77,7 +75,7 @@ with st.sidebar:
 
 t1, t2, t3 = st.tabs(["🔍 SCANNER", "💼 PORTAFOGLIO", "📊 FISCALE"])
 
-# --- TAB 1: SCANNER CON STAKE VISIBILE ---
+# --- TAB 1: SCANNER ---
 with t1:
     pend_list = df_attuale[df_attuale['Esito'] == "Pendente"]['Match'].tolist()
     leagues = {v: k for k, v in LEAGUE_NAMES.items()}
@@ -111,21 +109,22 @@ with t1:
                                         opts.append({"T": f"{o['name'].upper()} 2.5", "Q": q, "V": val, "BK": b['title']})
                 if opts:
                     best = max(opts, key=lambda x: x['V'])
-                    # Calcolo Stake Kelly: (Vantaggio / (Quota - 1)) * Aggressività
+                    # Calcolo matematico dello Stake
                     stk = round(max(2.0, min(budget_cassa * (best['V']/(best['Q']-1)) * rischio_kelly, budget_cassa*0.15)), 2)
                     
                     c_a, c_b = st.columns([3, 1])
-                    # Visualizzazione Stake aggiunta qui sotto
-                    c_a.markdown(f"📅 {dt_m.strftime('%d/%m %H:%M')} | **{nome_m}** | 💰 Stake: **{stk}€**<br>🎯 **{best['T']}** @{best['Q']} | Val: {round(best['V']*100,1)}% | 🏦 {best['BK']}", unsafe_allow_html=True)
+                    # RIGA AGGIORNATA: Adesso lo Stake è visibile qui sotto
+                    c_a.info(f"🏟️ {nome_m} | 💰 **STAKE: {stk}€**")
+                    c_a.markdown(f"📅 {dt_m.strftime('%d/%m %H:%M')} | 🎯 **{best['T']}** @{best['Q']} | Val: {round(best['V']*100,1)}% | 🏦 {best['BK']}", unsafe_allow_html=True)
                     
                     if nome_m in pend_list:
-                        c_b.button("✅", key=f"add_{i}", disabled=True, use_container_width=True)
+                        c_b.button("✅ In Gioco", key=f"add_{i}", disabled=True, use_container_width=True)
                     elif c_b.button("ADD", key=f"add_{i}", use_container_width=True):
                         nuova = pd.DataFrame([{"Data Match": dt_m.strftime('%d/%m %H:%M'), "Match": nome_m, "Scelta": best['T'], "Quota": best['Q'], "Stake": stk, "Bookmaker": best['BK'], "Esito": "Pendente", "Profitto": 0.0, "Sport_Key": m['sport_key'], "Risultato": "-"}])
                         salva_db(pd.concat([df_attuale, nuova], ignore_index=True)); st.rerun()
             except: continue
 
-# --- TAB 3: FISCALE AGGIORNATO ---
+# --- TAB 3: FISCALE ---
 with t3:
     if not df_attuale.empty:
         df_stats = df_attuale.copy()
@@ -133,16 +132,17 @@ with t3:
         df_chiuse = df_stats[df_stats['Esito'].isin(["VINTO", "PERSO"])]
         
         p_netto = round(df_chiuse['Profitto'].sum(), 2)
-        v_scommesso = round(df_chiuse['Stake'].sum(), 2) # Importo totale scommesso
+        v_scommesso = round(df_chiuse['Stake'].sum(), 2)
         v_vinte = df_chiuse[df_chiuse['Esito'] == "VINTO"]
-        vinc_lorda = round(v_vinte['Stake'].sum() + v_vinte['Profitto'].sum(), 2) # Vincita totale lorda
+        vinc_lorda = round(v_vinte['Stake'].sum() + v_vinte['Profitto'].sum(), 2)
 
+        st.subheader("📊 Analisi Profitti e Volumi")
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Profitto Netto", f"{p_netto} €")
-        m2.metric("Totale Scommesso", f"{v_scommesso} €")
-        m3.metric("Vincita Lorda", f"{vinc_lorda} €")
-        m4.metric("Target Goal", f"{OBIETTIVO_TARGET} €")
+        m2.metric("Volume Scommesso", f"{v_scommesso} €")
+        m3.metric("Incasso Lordo", f"{vinc_lorda} €")
+        m4.metric("Obiettivo Target", f"{OBIETTIVO_TARGET} €")
         
         st.divider()
         st.subheader("💾 Backup")
-        st.download_button("📥 Scarica Database CSV", data=df_attuale.to_csv(index=False).encode('utf-8'), file_name="backup_sniper.csv", use_container_width=True)
+        st.download_button("📥 Esporta Database CSV", data=df_attuale.to_csv(index=False).encode('utf-8'), file_name="backup_sniper.csv", use_container_width=True)

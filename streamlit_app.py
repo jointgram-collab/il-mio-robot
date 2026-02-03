@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from streamlit_gsheets import GSheetsConnection
 
 # --- CONFIGURAZIONE UI ---
-st.set_page_config(page_title="AI SNIPER V15.1.12 - STABILE AGGIORNATA", layout="wide")
+st.set_page_config(page_title="AI SNIPER V15.1.12 - FISCALE PRO", layout="wide")
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 
@@ -77,7 +77,7 @@ def chiudi_gara(idx, esito, risultato_score="-"):
 with st.sidebar:
     st.header("📊 Sistema")
     st.info(f"API Slot: {st.session_state['api_usage']['active_index'] + 1}")
-    budget_cassa = st.number_input("Cassa Disponibile (€)", value=BUDGET_DEFAULT)
+    budget_cassa = st.number_input("Cassa (€)", value=BUDGET_DEFAULT)
     rischio_kelly = st.slider("Aggressività Kelly", 0.05, 0.50, 0.15)
     soglia_valore = st.slider("Filtro Valore %", 0, 15, 3) / 100
 
@@ -120,10 +120,11 @@ with t1:
                                         opts.append({"T": f"{o['name'].upper()} 2.5", "Q": q, "V": val, "BK": b['title']})
                 if opts:
                     best = max(opts, key=lambda x: x['V'])
+                    # --- CALCOLO IMPORTO DA SCOMMETTERE (STAKE) ---
                     stk = round(max(2.0, min(budget_cassa * (best['V']/(best['Q']-1)) * rischio_kelly, budget_cassa*0.15)), 2)
                     
                     c_a, c_b = st.columns([3, 1])
-                    # MODIFICA: Importo da scommettere visibile accanto al match
+                    # Visualizzazione Importo accanto al match
                     c_a.markdown(f"📅 {dt_m.strftime('%d/%m %H:%M')} | **{nome_m}** | 💸 Importo: **{stk}€**<br>🎯 **{best['T']}** @{best['Q']} | Valore: {round(best['V']*100,1)}% | 🏦 {best['BK']}", unsafe_allow_html=True)
                     
                     if nome_m in pend_list:
@@ -144,7 +145,7 @@ with t2:
                 if b2.button("PERSO ❌", key=f"l_{i}"): chiudi_gara(i, "PERSO", "MAN")
                 if b3.button("ELIMINA 🗑️", key=f"d_{i}"): salva_db(df_attuale.drop(i)); st.rerun()
 
-# --- TAB 3: FISCALE & BACKUP ---
+# --- TAB 3: FISCALE ---
 with t3:
     if not df_attuale.empty:
         df_stats = df_attuale.copy()
@@ -152,22 +153,22 @@ with t3:
         df_chiuse = df_stats[df_stats['Esito'].isin(["VINTO", "PERSO"])]
         
         p_netto = round(df_chiuse['Profitto'].sum(), 2)
+        # --- CALCOLO TOTALE SCOMMESSO ---
+        totale_scommesso = round(df_chiuse['Stake'].sum(), 2)
         v_vinte = df_chiuse[df_chiuse['Esito'] == "VINTO"]
         vincita_lorda = round(v_vinte['Stake'].sum() + v_vinte['Profitto'].sum(), 2)
-        # MODIFICA: Totale scommesso (volume di gioco)
-        totale_scommesso = round(df_chiuse['Stake'].sum(), 2)
 
-        st.subheader("📈 Resoconto Fiscale")
+        st.subheader("📈 Metriche Fiscali")
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Profitto Netto", f"{p_netto} €")
         m2.metric("Totale Scommesso", f"{totale_scommesso} €") # Nuova Metrica
-        m3.metric("Vincita Lorda", f"{vincita_lorda} €")
+        m3.metric("Incasso Lordo", f"{vincita_lorda} €")
         m4.metric("ROI %", f"{round((p_netto/totale_scommesso*100),2) if totale_scommesso>0 else 0}%")
 
         st.divider()
-        st.subheader("💾 Backup & Ripristino")
+        st.subheader("💾 Backup")
         bk1, bk2 = st.columns(2)
-        with bk1: st.download_button("📥 Scarica Backup CSV", data=df_attuale.to_csv(index=False).encode('utf-8'), file_name="backup_v15.csv", use_container_width=True)
+        with bk1: st.download_button("📥 Scarica Backup CSV", data=df_attuale.to_csv(index=False).encode('utf-8'), file_name="backup_sniper.csv", use_container_width=True)
         with bk2:
-            up = st.file_uploader("Carica Backup", type="csv")
-            if up and st.button("🔄 RIPRISTINA"): salva_db(pd.read_csv(up)); st.rerun()
+            up = st.file_uploader("Ripristina", type="csv")
+            if up and st.button("🔄 CONFERMA"): salva_db(pd.read_csv(up)); st.rerun()

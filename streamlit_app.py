@@ -6,14 +6,14 @@ from datetime import datetime, timedelta
 from streamlit_gsheets import GSheetsConnection
 
 # --- 1. CONFIGURAZIONE UI ---
-st.set_page_config(page_title="AI SNIPER V15.1.12 - STABILE", layout="wide")
+st.set_page_config(page_title="AI SNIPER V15.1.12 - FULL INFO", layout="wide")
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# --- 2. COSTANTI GLOBALI (Definite all'inizio per evitare NameError) ---
+# --- 2. COSTANTI GLOBALI ---
 API_KEYS = ['01f1c8f2a314814b17de03eeb6c53623', '55f08c25f38fa1006dd9e66282170e1a']
 BUDGET_DISPONIBILE = 500.0 
-OBIETTIVO_TARGET = 5000.0  # <--- Variabile ora globale
+OBIETTIVO_TARGET = 5000.0  
 
 if 'api_usage' not in st.session_state:
     st.session_state['api_usage'] = {'remaining': "N/D", 'used': "N/D", 'active_index': 0}
@@ -82,7 +82,7 @@ with st.sidebar:
 
 t1, t2, t3 = st.tabs(["🔍 SCANNER", "💼 PORTAFOGLIO", "📊 FISCALE"])
 
-# --- TAB 1: SCANNER ---
+# --- TAB 1: SCANNER RIGA UNICA ---
 with t1:
     pend_list = df_attuale[df_attuale['Esito'] == "Pendente"]['Match'].tolist()
     leagues = {v: k for k, v in LEAGUE_NAMES.items()}
@@ -131,16 +131,26 @@ with t1:
                     st.divider()
             except: continue
 
-# --- TAB 2: PORTAFOGLIO ---
+# --- TAB 2: PORTAFOGLIO (INFORMAZIONI COMPLETE) ---
 with t2:
     df_p = df_attuale[df_attuale['Esito'] == "Pendente"].copy()
     if not df_p.empty:
         for i, r in df_p.iterrows():
-            with st.expander(f"{r['Data Match']} | {r['Match']} | {r['Stake']}€"):
+            # Recupero nome campionato e calcolo vincita lorda
+            camp = LEAGUE_NAMES.get(r['Sport_Key'], r['Sport_Key'])
+            v_lorda = round(float(r['Stake']) * float(r['Quota']), 2)
+            
+            # Titolo Expander con: Campionato, Bookmaker, Stake e Vincita Lorda
+            label_p = f"📅 {r['Data Match']} | {r['Match']} | {camp} | 🏦 {r['Bookmaker']} | 💰 {r['Stake']}€ | 🏆 Vincita: {v_lorda}€"
+            
+            with st.expander(label_p):
+                st.write(f"🎯 **Scommessa:** {r['Scelta']} @{r['Quota']}")
                 b1, b2, b3 = st.columns(3)
                 if b1.button("VINTO ✅", key=f"w_{i}"): chiudi_gara(i, "VINTO", "MAN")
                 if b2.button("PERSO ❌", key=f"l_{i}"): chiudi_gara(i, "PERSO", "MAN")
                 if b3.button("ELIMINA 🗑️", key=f"d_{i}"): salva_db(df_attuale.drop(i)); st.rerun()
+    else:
+        st.info("Nessuna giocata pendente nel portafoglio.")
 
 # --- TAB 3: FISCALE ---
 with t3:
@@ -158,7 +168,7 @@ with t3:
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Profitto Netto", f"{p_netto} €")
         m2.metric("Volume Scommesso", f"{v_scommesso} €")
-        m3.metric("Goal Target", f"{OBIETTIVO_TARGET} €") # <--- Qui non darà più errore
+        m3.metric("Goal Target", f"{OBIETTIVO_TARGET} €") 
         m4.metric("Incasso Lordo", f"{vinc_lorda} €")
         
         st.divider()

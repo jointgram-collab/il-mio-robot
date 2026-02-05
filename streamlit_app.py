@@ -92,8 +92,9 @@ st.title("🎯 AI SNIPER V15.1.12")
 df_attuale = carica_db()
 t1, t2, t3 = st.tabs(["🔍 SCANNER", "💼 PORTAFOGLIO", "📊 FISCALE"])
 
-# --- TAB 1: SCANNER (SMART DUPLICATE CHECK) ---
+# --- TAB 1: SCANNER (VERSIONE COMPATTA SU RIGA UNICA) ---
 with t1:
+    pend_list = df_attuale[df_attuale['Esito'] == "Pendente"]['Match'].tolist()
     leagues = {v: k for k, v in LEAGUE_NAMES.items()}
     c_sel, c_sing, c_all, c_ore = st.columns([1.5, 1, 1, 1])
     sel_name = c_sel.selectbox("Campionato:", list(leagues.keys()))
@@ -116,10 +117,9 @@ with t1:
         st.session_state['api_data'] = all_found
         st.rerun()
 
+    st.divider()
+
     if st.session_state['api_data']:
-        # Recupero match già in gioco
-        pend_list = df_attuale[df_attuale['Esito'] == "Pendente"]['Match'].tolist()
-        
         for i, m in enumerate(st.session_state['api_data']):
             try:
                 nome_m = f"{m['home_team']}-{m['away_team']}"
@@ -136,19 +136,32 @@ with t1:
                                     q = o['price']
                                     val = ((1/q + 0.06) * q) - 1
                                     if val >= soglia_valore:
-                                        opts.append({"T": f"{o['name'].upper()} 2.5", "Q": q, "V": val, "BK": b['title']})
+                                        opts.append({"T": f"{o['name'].upper()}", "Q": q, "V": val, "BK": b['title']})
+                
                 if opts:
                     best = max(opts, key=lambda x: x['V'])
+                    # Calcolo Stake (Budget 500€)
                     stk = round(max(2.0, min(budget_cassa * (best['V']/(best['Q']-1)) * rischio_kelly, budget_cassa*0.15)), 2)
-                    c_a, c_b = st.columns([3, 1])
-                    c_a.markdown(f"📅 {dt_m.strftime('%d/%m %H:%M')} | **{nome_m}**<br>🎯 **{best['T']}** @{best['Q']} | Val: {round(best['V']*100,1)}% | 🏦 {best['BK']}", unsafe_allow_html=True)
                     
-                    # Logica controllo duplicato
-                    if nome_m in pend_list:
-                        c_b.button("✅", key=f"add_{i}", disabled=True, use_container_width=True)
-                    elif c_b.button("ADD", key=f"add_{i}", use_container_width=True):
-                        nuova = pd.DataFrame([{"Data Match": dt_m.strftime('%d/%m %H:%M'), "Match": nome_m, "Scelta": best['T'], "Quota": best['Q'], "Stake": stk, "Bookmaker": best['BK'], "Esito": "Pendente", "Profitto": 0.0, "Sport_Key": m['sport_key'], "Risultato": "-"}])
-                        salva_db(pd.concat([df_attuale, nuova], ignore_index=True)); st.rerun()
+                    # RIGA UNICA: Organizzazione in 6 colonne + tasto
+                    col1, col2, col3, col4, col5 = st.columns([4, 1.2, 1.2, 1.2, 0.8])
+                    
+                    with col1:
+                        st.markdown(f"📅 {dt_m.strftime('%d/%m %H:%M')} | **{nome_m}**")
+                    with col2:
+                        st.markdown(f"🎯 {best['T']} 2.5")
+                    with col3:
+                        st.markdown(f"📈 **@{best['Q']}** ({round(best['V']*100,1)}%)")
+                    with col4:
+                        st.markdown(f"💰 **STAKE: {stk}€**")
+                    with col5:
+                        if nome_m in pend_list:
+                            st.button("✅", key=f"add_{i}", disabled=True)
+                        elif st.button("ADD", key=f"add_{i}"):
+                            nuova = pd.DataFrame([{"Data Match": dt_m.strftime('%d/%m %H:%M'), "Match": nome_m, "Scelta": f"{best['T']} 2.5", "Quota": best['Q'], "Stake": stk, "Bookmaker": best['BK'], "Esito": "Pendente", "Profitto": 0.0, "Sport_Key": m['sport_key'], "Risultato": "-"}])
+                            salva_db(pd.concat([df_attuale, nuova], ignore_index=True))
+                            st.rerun()
+                    st.divider()
             except: continue
 
 # --- TAB 2: PORTAFOGLIO ---

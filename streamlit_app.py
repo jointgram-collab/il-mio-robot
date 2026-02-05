@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from streamlit_gsheets import GSheetsConnection
 
 # --- 1. CONFIGURAZIONE UI ---
-st.set_page_config(page_title="AI SNIPER V15.1.12 - FULL INFO", layout="wide")
+st.set_page_config(page_title="AI SNIPER V15.1.12 - PORTAFOGLIO STAKE", layout="wide")
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 
@@ -82,7 +82,7 @@ with st.sidebar:
 
 t1, t2, t3 = st.tabs(["🔍 SCANNER", "💼 PORTAFOGLIO", "📊 FISCALE"])
 
-# --- TAB 1: SCANNER RIGA UNICA ---
+# --- TAB 1: SCANNER ---
 with t1:
     pend_list = df_attuale[df_attuale['Esito'] == "Pendente"]['Match'].tolist()
     leagues = {v: k for k, v in LEAGUE_NAMES.items()}
@@ -131,20 +131,19 @@ with t1:
                     st.divider()
             except: continue
 
-# --- TAB 2: PORTAFOGLIO (INFORMAZIONI COMPLETE) ---
+# --- TAB 2: PORTAFOGLIO (STAKE VISIBILE) ---
 with t2:
     df_p = df_attuale[df_attuale['Esito'] == "Pendente"].copy()
     if not df_p.empty:
         for i, r in df_p.iterrows():
-            # Recupero nome campionato e calcolo vincita lorda
+            # Recupero nome campionato
             camp = LEAGUE_NAMES.get(r['Sport_Key'], r['Sport_Key'])
-            v_lorda = round(float(r['Stake']) * float(r['Quota']), 2)
             
-            # Titolo Expander con: Campionato, Bookmaker, Stake e Vincita Lorda
-            label_p = f"📅 {r['Data Match']} | {r['Match']} | {camp} | 🏦 {r['Bookmaker']} | 💰 {r['Stake']}€ | 🏆 Vincita: {v_lorda}€"
+            # MODIFICA: Titolo Expander con l'informazione dello STAKE proposto
+            label_p = f"📅 {r['Data Match']} | {r['Match']} | {camp} | 🏦 {r['Bookmaker']} | 💰 STAKE: {r['Stake']}€"
             
             with st.expander(label_p):
-                st.write(f"🎯 **Scommessa:** {r['Scelta']} @{r['Quota']}")
+                st.write(f"🎯 **Scommessa:** {r['Scelta']} @{r['Quota']} | **Vincita Potenziale:** {round(float(r['Stake']) * float(r['Quota']), 2)}€")
                 b1, b2, b3 = st.columns(3)
                 if b1.button("VINTO ✅", key=f"w_{i}"): chiudi_gara(i, "VINTO", "MAN")
                 if b2.button("PERSO ❌", key=f"l_{i}"): chiudi_gara(i, "PERSO", "MAN")

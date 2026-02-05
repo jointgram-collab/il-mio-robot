@@ -2,19 +2,17 @@ import streamlit as st
 import pandas as pd
 import requests
 import time
-import io
 from datetime import datetime, timedelta
 from streamlit_gsheets import GSheetsConnection
 
 # --- CONFIGURAZIONE UI ---
-st.set_page_config(page_title="AI SNIPER V15.1.12 - COMPLETE SUITE", layout="wide")
+st.set_page_config(page_title="AI SNIPER V15.1.12 - COMPACT", layout="wide")
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# --- CONFIGURAZIONE COSTANTI ---
+# --- COSTANTI (Budget 500€ / Target 5000€) ---
 API_KEYS = ['01f1c8f2a314814b17de03eeb6c53623', '55f08c25f38fa1006dd9e66282170e1a']
 BUDGET_DISPONIBILE = 500.0 
-OBIETTIVO_TARGET = 5000.0   
 
 if 'api_usage' not in st.session_state:
     st.session_state['api_usage'] = {'remaining': "N/D", 'used': "N/D", 'active_index': 0}
@@ -31,7 +29,7 @@ LEAGUE_NAMES = {
 
 BK_EURO_AUTH = ["Bet365", "Snai", "Better", "Planetwin365", "Eurobet", "Goldbet", "Sisal", "Bwin", "William Hill", "888sport"]
 
-# --- FUNZIONI CORE API ---
+# --- FUNZIONI CORE ---
 def chiamata_sicura_api(endpoint, params_extra={}):
     idx = st.session_state['api_usage'].get('active_index', 0)
     for _ in range(len(API_KEYS)):
@@ -40,20 +38,16 @@ def chiamata_sicura_api(endpoint, params_extra={}):
         params.update(params_extra)
         try:
             r = requests.get(endpoint, params=params)
-            if r.status_code in [401, 429]:
-                idx = (idx + 1) % len(API_KEYS)
-                st.session_state['api_usage']['active_index'] = idx
-                continue
             if r.status_code == 200:
                 st.session_state['api_usage']['remaining'] = r.headers.get('x-requests-remaining', "0")
                 st.session_state['api_usage']['used'] = r.headers.get('x-requests-used', "0")
                 return r.json()
-        except:
             idx = (idx + 1) % len(API_KEYS)
             st.session_state['api_usage']['active_index'] = idx
+        except:
+            idx = (idx + 1) % len(API_KEYS)
     return None
 
-# --- FUNZIONI DATABASE ---
 def carica_db():
     try:
         df = conn.read(worksheet="Giocate", ttl=0)
@@ -65,61 +59,34 @@ def salva_db(df):
     conn.update(worksheet="Giocate", data=df)
     st.cache_data.clear()
 
-def chiudi_gara(idx, esito, risultato_score="-"):
-    df = carica_db()
-    if idx in df.index:
-        q, s = float(df.at[idx, 'Quota']), float(df.at[idx, 'Stake'])
-        df.at[idx, 'Esito'] = esito
-        df.at[idx, 'Risultato'] = risultato_score
-        df.at[idx, 'Profitto'] = round((s * q) - s, 2) if esito == "VINTO" else -s
-        salva_db(df)
-        st.rerun()
-
-# --- SIDEBAR ---
-with st.sidebar:
-    st.header("📊 Sistema & API")
-    st.info(f"Slot API in uso: {st.session_state['api_usage']['active_index'] + 1}")
-    c1, c2 = st.columns(2)
-    c1.metric("Residui", st.session_state['api_usage']['remaining'])
-    c2.metric("Usati", st.session_state['api_usage']['used'])
-    st.divider()
-    budget_cassa = st.number_input("Cassa (€)", value=BUDGET_DISPONIBILE)
-    rischio_kelly = st.slider("Aggressività Kelly", 0.05, 0.50, 0.15)
-    soglia_valore = st.slider("Filtro Valore %", 0, 15, 3) / 100
-
-# --- INTERFACCIA PRINCIPALE ---
+# --- INTERFACCIA ---
 st.title("🎯 AI SNIPER V15.1.12")
 df_attuale = carica_db()
+
+with st.sidebar:
+    st.header("📊 Parametri")
+    budget_cassa = st.number_input("Budget Attuale (€)", value=BUDGET_DISPONIBILE)
+    rischio_kelly = st.slider("Aggressività Kelly", 0.05, 0.50, 0.15)
+    soglia_valore = st.slider("Min Value %", 0, 15, 3) / 100
+
 t1, t2, t3 = st.tabs(["🔍 SCANNER", "💼 PORTAFOGLIO", "📊 FISCALE"])
 
-# --- TAB 1: SCANNER (VERSIONE COMPATTA SU RIGA UNICA) ---
+# --- TAB 1: SCANNER RIGA UNICA ---
 with t1:
     pend_list = df_attuale[df_attuale['Esito'] == "Pendente"]['Match'].tolist()
     leagues = {v: k for k, v in LEAGUE_NAMES.items()}
-    c_sel, c_sing, c_all, c_ore = st.columns([1.5, 1, 1, 1])
+    c_sel, c_btn, c_ore = st.columns([2, 1, 1])
     sel_name = c_sel.selectbox("Campionato:", list(leagues.keys()))
-    ore_limite = c_ore.selectbox("Fino a (Ore):", [24, 48, 72, 96, 120, 168], index=2)
+    ore_limite = c_ore.selectbox("Fino a (Ore):", [24, 48, 72, 96, 120], index=2)
     
-    if c_sing.button("🎯 SCAN SINGOLO", use_container_width=True):
+    if c_btn.button("🎯 AVVIA SCANNER", use_container_width=True):
         sport_key = leagues[sel_name]
         data = chiamata_sicura_api(f'https://api.the-odds-api.com/v4/sports/{sport_key}/odds/', {'regions': 'eu', 'markets': 'totals'})
         if data: st.session_state['api_data'] = data
         st.rerun()
 
-    if c_all.button("🚀 SCAN TOTALE", use_container_width=True):
-        all_found = []
-        pbar = st.progress(0)
-        for idx, k in enumerate(LEAGUE_NAMES.keys()):
-            data = chiamata_sicura_api(f'https://api.the-odds-api.com/v4/sports/{k}/odds/', {'regions': 'eu', 'markets': 'totals'})
-            if data: all_found.extend(data)
-            time.sleep(0.3)
-            pbar.progress((idx + 1) / len(LEAGUE_NAMES))
-        st.session_state['api_data'] = all_found
-        st.rerun()
-
-    st.divider()
-
     if st.session_state['api_data']:
+        st.markdown("---")
         for i, m in enumerate(st.session_state['api_data']):
             try:
                 nome_m = f"{m['home_team']}-{m['away_team']}"
@@ -136,22 +103,20 @@ with t1:
                                     q = o['price']
                                     val = ((1/q + 0.06) * q) - 1
                                     if val >= soglia_valore:
-                                        opts.append({"T": f"{o['name'].upper()}", "Q": q, "V": val, "BK": b['title']})
-                
+                                        opts.append({"T": o['name'].upper(), "Q": q, "V": val, "BK": b['title']})
                 if opts:
                     best = max(opts, key=lambda x: x['V'])
-                    # Calcolo Stake (Budget 500€)
                     stk = round(max(2.0, min(budget_cassa * (best['V']/(best['Q']-1)) * rischio_kelly, budget_cassa*0.15)), 2)
                     
-                    # RIGA UNICA: Organizzazione in 6 colonne + tasto
-                    col1, col2, col3, col4, col5 = st.columns([4, 1.2, 1.2, 1.2, 0.8])
+                    # --- RIGA UNICA COMPATTA ---
+                    col1, col2, col3, col4, col5 = st.columns([3.5, 1.2, 1.5, 1.2, 0.6])
                     
                     with col1:
                         st.markdown(f"📅 {dt_m.strftime('%d/%m %H:%M')} | **{nome_m}**")
                     with col2:
-                        st.markdown(f"🎯 {best['T']} 2.5")
+                        st.markdown(f"🎯 {best['T']} 2.5 | **@{best['Q']}**")
                     with col3:
-                        st.markdown(f"📈 **@{best['Q']}** ({round(best['V']*100,1)}%)")
+                        st.markdown(f"🏦 {best['BK']} | Val: **{round(best['V']*100,1)}%**")
                     with col4:
                         st.markdown(f"💰 **STAKE: {stk}€**")
                     with col5:
@@ -163,7 +128,6 @@ with t1:
                             st.rerun()
                     st.divider()
             except: continue
-
 # --- TAB 2: PORTAFOGLIO ---
 with t2:
     df_p = df_attuale[df_attuale['Esito'] == "Pendente"].copy()

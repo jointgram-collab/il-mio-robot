@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from streamlit_gsheets import GSheetsConnection
 
 # --- 1. CONFIGURAZIONE UI ---
-st.set_page_config(page_title="AI SNIPER V15.1.12 - FULL STABLE", layout="wide")
+st.set_page_config(page_title="AI SNIPER V15.1.12 - PORTFOLIO CHECK", layout="wide")
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 # --- 2. COSTANTI GLOBALI ---
@@ -92,7 +92,7 @@ def check_risultati_automatico():
                     score = match_api['scores']
                     if score:
                         tot_goal = sum(int(s['score']) for s in score)
-                        scelta_clean = r_db['Scelta'].upper()
+                        scelta_clean = str(r_db['Scelta']).upper()
                         esito = "VINTO" if ("OVER" in scelta_clean and tot_goal > 2) or ("UNDER" in scelta_clean and tot_goal < 3) else "PERSO"
                         
                         q, s = float(r_db['Quota']), float(r_db['Stake'])
@@ -102,8 +102,10 @@ def check_risultati_automatico():
                         aggiornati = True
     if aggiornati:
         salva_db(df)
-        st.success("Risultati aggiornati!")
+        st.success("Risultati aggiornati con successo!")
         st.rerun()
+    else:
+        st.warning("Nessun nuovo risultato completato trovato.")
 
 # --- 5. INTERFACCIA ---
 st.title("🎯 AI SNIPER V15.1.12")
@@ -114,9 +116,6 @@ with st.sidebar:
     budget_cassa = st.number_input("Budget Attuale (€)", value=BUDGET_DISPONIBILE)
     rischio_kelly = st.slider("Aggressività Kelly", 0.05, 0.50, 0.15)
     soglia_valore = st.slider("Min Value %", 0, 15, 3) / 100
-    st.divider()
-    if st.button("🔄 Check Risultati Auto", use_container_width=True):
-        check_risultati_automatico()
 
 t1, t2, t3 = st.tabs(["🔍 SCANNER", "💼 PORTAFOGLIO", "📊 FISCALE"])
 
@@ -170,31 +169,41 @@ with t1:
                     st.divider()
             except: continue
 
-# --- TAB 2: PORTAFOGLIO CON RIEPILOGO ---
+# --- TAB 2: PORTAFOGLIO CON PULSANTE CHECK ---
 with t2:
     df_p = df_attuale[df_attuale['Esito'] == "Pendente"].copy()
+    
+    # Intestazione con Metriche e Pulsante Aggiorna
+    m_col1, m_col2, m_col3 = st.columns([1, 1, 1])
+    
     if not df_p.empty:
-        # Calcolo Stake Totale e Vincita Potenziale Lorda
         df_p['Stake'] = pd.to_numeric(df_p['Stake'], errors='coerce').fillna(0)
         df_p['Quota'] = pd.to_numeric(df_p['Quota'], errors='coerce').fillna(0)
         
         stk_tot = round(df_p['Stake'].sum(), 2)
         vinc_pot = round((df_p['Stake'] * df_p['Quota']).sum(), 2)
         
-        r1, r2 = st.columns(2)
-        r1.metric("Stake Totale Impegnato", f"{stk_tot} €")
-        r2.metric("Vincita Potenziale Lorda", f"{vinc_pot} €")
-        st.divider()
+        m_col1.metric("Stake Impegnato", f"{stk_tot} €")
+        m_col2.metric("Vincita Potenziale", f"{vinc_pot} €")
+    else:
+        m_col1.metric("Stake Impegnato", "0 €")
+        m_col2.metric("Vincita Potenziale", "0 €")
 
+    # PULSANTE CHECK AUTOMATICO NEL PORTAFOGLIO
+    if m_col3.button("🔄 AGGIORNA RISULTATI API", use_container_width=True, type="primary"):
+        check_risultati_automatico()
+        
+    st.divider()
+
+    if not df_p.empty:
         for i, r in df_p.iterrows():
             camp = LEAGUE_NAMES.get(r['Sport_Key'], r['Sport_Key'])
-            # Titolo riga con Stake Proposto come richiesto
             label_p = f"📅 {r['Data Match']} | {r['Match']} | {camp} | 🏦 {r['Bookmaker']} | 💰 STAKE: {r['Stake']}€"
             with st.expander(label_p):
                 st.write(f"🎯 **Scommessa:** {r['Scelta']} @{r['Quota']} | Vincita Lorda: {round(float(r['Stake'])*float(r['Quota']),2)}€")
                 b1, b2, b3 = st.columns(3)
-                if b1.button("VINTO ✅", key=f"w_{i}"): chiudi_gara(i, "VINTO", "AUTO")
-                if b2.button("PERSO ❌", key=f"l_{i}"): chiudi_gara(i, "PERSO", "AUTO")
+                if b1.button("VINTO ✅", key=f"w_{i}"): chiudi_gara(i, "VINTO", "MAN")
+                if b2.button("PERSO ❌", key=f"l_{i}"): chiudi_gara(i, "PERSO", "MAN")
                 if b3.button("ELIMINA 🗑️", key=f"d_{i}"): salva_db(df_attuale.drop(i)); st.rerun()
     else:
         st.info("Nessuna giocata pendente.")

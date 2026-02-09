@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from streamlit_gsheets import GSheetsConnection
 
 # --- 1. CONFIGURAZIONE UI ---
-st.set_page_config(page_title="AI SNIPER V15.1.23", layout="wide")
+st.set_page_config(page_title="AI SNIPER V15.1.24", layout="wide")
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 # --- 2. COSTANTI ---
@@ -32,19 +32,21 @@ if 'api_usage' not in st.session_state: st.session_state['api_usage'] = {'remain
 
 # --- 3. FUNZIONI CORE ---
 def fetch_api(endpoint, p_extra={}):
+    # Proviamo a usare le chiavi a rotazione in caso di errore
     idx = st.session_state['api_usage']['active_index']
-    for _ in range(len(API_KEYS)):
-        current_key = API_KEYS[idx]
+    for attempt in range(len(API_KEYS)):
+        current_idx = (idx + attempt) % len(API_KEYS)
+        current_key = API_KEYS[current_idx]
         p = {'api_key': current_key, 'regions': 'eu', 'oddsFormat': 'decimal'}
         p.update(p_extra)
         try:
             r = requests.get(endpoint, params=p, timeout=12)
             if r.status_code == 200:
                 st.session_state['api_usage']['remaining'] = r.headers.get('x-requests-remaining', "N/D")
-                st.session_state['api_usage']['active_index'] = idx
+                st.session_state['api_usage']['active_index'] = current_idx
                 return r.json()
-            idx = (idx + 1) % len(API_KEYS)
-        except: idx = (idx + 1) % len(API_KEYS)
+        except:
+            continue
     return None
 
 def carica_db():
@@ -67,7 +69,7 @@ def chiudi_gara(idx, esito, risultato_score="-"):
         salva_db(df); st.rerun()
 
 # --- 4. INTERFACCIA ---
-st.title("🎯 AI SNIPER V15.1.23")
+st.title("🎯 AI SNIPER V15.1.24")
 df_attuale = carica_db()
 
 with st.sidebar:
@@ -75,7 +77,13 @@ with st.sidebar:
     budget_cassa = st.number_input("Budget Attuale (€)", value=500.0)
     rischio_kelly = st.slider("Aggressività Kelly", 0.05, 0.50, 0.15)
     soglia_valore = st.slider("Min Value %", 0, 15, 0) / 100
-    st.info(f"API Residue: {st.session_state['api_usage']['remaining']}")
+    
+    # --- NUOVO INDICATORE CHIAVI ---
+    st.divider()
+    st.info(f"💳 API Residue: **{st.session_state['api_usage']['remaining']}**")
+    chiave_num = st.session_state['api_usage']['active_index'] + 1
+    st.success(f"🔌 API Attiva: **Slot {chiave_num}**")
+    st.divider()
 
 tab1, tab2, tab3 = st.tabs(["🔍 SCANNER", "💼 PORTAFOGLIO", "📊 DASHBOARD FISCALE"])
 
@@ -100,7 +108,6 @@ with tab1:
 
     if st.session_state['api_data']:
         m_key = MARKET_MAP[sel_market]
-        # Creiamo un set di tuple (Match, Scelta) per il controllo rapido
         giocate_esistenti = set(zip(df_attuale['Match'], df_attuale['Scelta']))
         found = 0
         for m in st.session_state['api_data']:
@@ -133,16 +140,15 @@ with tab1:
                     col2.write(f"🎯 {best['T']} @**{best['Q']}**")
                     col3.write(f"🏦 {best['BK']} ({round(best['V']*100,1)}%)")
                     
-                    # MODIFICA QUI: Controllo incrociato Match + Scelta
                     if (nome, best['T']) in giocate_esistenti:
-                        col4.button("✅", key=f"ok_{nome}_{best['T']}", disabled=True, help="Giocata già in portafoglio")
+                        col4.button("✅", key=f"ok_{nome}_{best['T']}", disabled=True)
                     elif col4.button("ADD", key=f"add_{nome}_{found}"):
                         nuova = pd.DataFrame([{"Data Match": dt.strftime('%d/%m %H:%M'), "Match": nome, "Scelta": best['T'], "Quota": best['Q'], "Stake": stk, "Bookmaker": best['BK'], "Esito": "Pendente", "Profitto": 0.0, "Sport_Key": m['sport_key'], "Risultato": "-"}])
                         salva_db(pd.concat([df_attuale, nuova], ignore_index=True)); st.rerun()
                     st.divider()
             except: continue
 
-# --- TAB 2: PORTAFOGLIO + AGGIORNAMENTO AUTOMATICO ---
+# --- TAB 2: PORTAFOGLIO ---
 with tab2:
     df_p = df_attuale[df_attuale['Esito'] == "Pendente"].copy()
     if not df_p.empty:
@@ -156,7 +162,6 @@ with tab2:
                         h_score = int(next(x['score'] for x in s if x['name'] == match_data['home_team']))
                         a_score = int(next(x['score'] for x in s if x['name'] == match_data['away_team']))
                         res_str = f"{h_score}-{a_score}"
-                        
                         vittoria = False
                         sc = r['Scelta']
                         if sc == "GOAL (GG)": vittoria = (h_score > 0 and a_score > 0)
@@ -166,7 +171,6 @@ with tab2:
                         elif sc == match_data['home_team']: vittoria = (h_score > a_score)
                         elif sc == match_data['away_team']: vittoria = (a_score > h_score)
                         elif sc == "Draw": vittoria = (h_score == a_score)
-                        
                         chiudi_gara(idx, "VINTO" if vittoria else "PERSO", res_str)
             st.rerun()
 

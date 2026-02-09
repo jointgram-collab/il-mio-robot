@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from streamlit_gsheets import GSheetsConnection
 
 # --- 1. CONFIGURAZIONE UI ---
-st.set_page_config(page_title="AI SNIPER V15.1.22", layout="wide")
+st.set_page_config(page_title="AI SNIPER V15.1.23", layout="wide")
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 # --- 2. COSTANTI ---
@@ -67,7 +67,7 @@ def chiudi_gara(idx, esito, risultato_score="-"):
         salva_db(df); st.rerun()
 
 # --- 4. INTERFACCIA ---
-st.title("🎯 AI SNIPER V15.1.22")
+st.title("🎯 AI SNIPER V15.1.23")
 df_attuale = carica_db()
 
 with st.sidebar:
@@ -100,7 +100,8 @@ with tab1:
 
     if st.session_state['api_data']:
         m_key = MARKET_MAP[sel_market]
-        pend_list = df_attuale['Match'].tolist()
+        # Creiamo un set di tuple (Match, Scelta) per il controllo rapido
+        giocate_esistenti = set(zip(df_attuale['Match'], df_attuale['Scelta']))
         found = 0
         for m in st.session_state['api_data']:
             try:
@@ -131,7 +132,10 @@ with tab1:
                     col1.write(f"📅 {dt.strftime('%d/%m %H:%M')} | **{nome}**")
                     col2.write(f"🎯 {best['T']} @**{best['Q']}**")
                     col3.write(f"🏦 {best['BK']} ({round(best['V']*100,1)}%)")
-                    if nome in pend_list: col4.button("✅", key=f"ok_{nome}", disabled=True)
+                    
+                    # MODIFICA QUI: Controllo incrociato Match + Scelta
+                    if (nome, best['T']) in giocate_esistenti:
+                        col4.button("✅", key=f"ok_{nome}_{best['T']}", disabled=True, help="Giocata già in portafoglio")
                     elif col4.button("ADD", key=f"add_{nome}_{found}"):
                         nuova = pd.DataFrame([{"Data Match": dt.strftime('%d/%m %H:%M'), "Match": nome, "Scelta": best['T'], "Quota": best['Q'], "Stake": stk, "Bookmaker": best['BK'], "Esito": "Pendente", "Profitto": 0.0, "Sport_Key": m['sport_key'], "Risultato": "-"}])
                         salva_db(pd.concat([df_attuale, nuova], ignore_index=True)); st.rerun()
@@ -168,6 +172,7 @@ with tab2:
 
         for i, r in df_p.iterrows():
             with st.expander(f"📅 {r['Data Match']} | {r['Match']} | {r['Stake']}€"):
+                st.write(f"🎯 **{r['Scelta']}** @{r['Quota']} su {r['Bookmaker']}")
                 b1, b2, b3 = st.columns(3)
                 if b1.button("VINTO ✅", key=f"v_{i}"): chiudi_gara(i, "VINTO")
                 if b2.button("PERSO ❌", key=f"p_{i}"): chiudi_gara(i, "PERSO")

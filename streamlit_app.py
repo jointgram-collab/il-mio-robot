@@ -110,6 +110,7 @@ with st.sidebar:
 tab1, tab2, tab3 = st.tabs(["🔍 SCANNER", "💼 PORTAFOGLIO", "📊 FISCALE & BACKUP"])
 
 # --- TAB 1: SCANNER MULTI-MERCATO ---
+# --- TAB 1: SCANNER MULTI-MERCATO (SOSTITUISCI DA QUI) ---
 with tab1:
     c_a, c_b, c_m, c_o = st.columns([1.5, 1, 1.5, 0.8])
     leagues_map = {v: k for k, v in LEAGUE_NAMES.items()}
@@ -152,10 +153,20 @@ with tab1:
                             for o in mk['outcomes']:
                                 if m_key == "totals" and o.get('point') != 2.5: continue
                                 q = o['price']
-                                margin = 0.06 if m_key == "totals" else 0.08
+                                
+                                # LOGICA MARGINE E TRADUZIONE ETICHETTE
+                                if m_key == "both_teams_to_score":
+                                    margin = 0.05
+                                    label = "GOAL (GG)" if o['name'].lower() in ["yes", "both"] else "NO GOAL (NG)"
+                                elif m_key == "h2h":
+                                    margin = 0.07
+                                    label = o['name']
+                                else:
+                                    margin = 0.06
+                                    label = f"{o['name'].upper()} 2.5"
+                                
                                 val = ((1/q + margin) * q) - 1
                                 if val >= soglia_valore:
-                                    label = f"{o['name'].upper()} 2.5" if m_key == "totals" else o['name']
                                     opts.append({"T": label, "Q": q, "V": val, "BK": b['title']})
                 if opts:
                     best = max(opts, key=lambda x: x['V'])
@@ -172,6 +183,7 @@ with tab1:
                         salva_db(pd.concat([df_attuale, nuova], ignore_index=True)); st.rerun()
                     st.divider()
             except: continue
+# --- FINE TAB 1 (IL CODICE PROSEGUE CON WITH TAB2) ---
 
 # --- TAB 2: PORTAFOGLIO ---
 with tab2:

@@ -5,12 +5,13 @@ from datetime import datetime, timedelta
 from streamlit_gsheets import GSheetsConnection
 
 # --- 1. CONFIGURAZIONE UI ---
-st.set_page_config(page_title="AI SNIPER V15.1.17 - STABLE", layout="wide")
+st.set_page_config(page_title="AI SNIPER V15.1.20", layout="wide")
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 # --- 2. COSTANTI ---
 API_KEYS = ['01f1c8f2a314814b17de03eeb6c53623', '55f08c25f38fa1006dd9e66282170e1a']
 BK_EURO_AUTH = ["Bet365", "Snai", "Better", "Planetwin365", "Eurobet", "Goldbet", "Sisal", "Bwin", "William Hill", "888sport", "Unibet", "Betfair"]
+OBIETTIVO_TARGET = 5000.0
 
 LEAGUE_NAMES = {
     "soccer_italy_serie_a": "🇮🇹 Serie A", "soccer_italy_serie_b": "🇮🇹 Serie B",
@@ -43,8 +44,7 @@ def fetch_api(endpoint, p_extra={}):
                 st.session_state['api_usage']['active_index'] = idx
                 return r.json()
             idx = (idx + 1) % len(API_KEYS)
-        except:
-            idx = (idx + 1) % len(API_KEYS)
+        except: idx = (idx + 1) % len(API_KEYS)
     return None
 
 def carica_db():
@@ -67,7 +67,7 @@ def chiudi_gara(idx, esito, risultato_score="-"):
         salva_db(df); st.rerun()
 
 # --- 4. INTERFACCIA ---
-st.title("🎯 AI SNIPER V15.1.17")
+st.title("🎯 AI SNIPER V15.1.20")
 df_attuale = carica_db()
 
 with st.sidebar:
@@ -77,7 +77,7 @@ with st.sidebar:
     soglia_valore = st.slider("Min Value %", 0, 15, 0) / 100
     st.info(f"API Residue: {st.session_state['api_usage']['remaining']}")
 
-tab1, tab2, tab3 = st.tabs(["🔍 SCANNER", "💼 PORTAFOGLIO", "📊 FISCALE & BACKUP"])
+tab1, tab2, tab3 = st.tabs(["🔍 SCANNER", "💼 PORTAFOGLIO", "📊 DASHBOARD FISCALE"])
 
 # --- TAB 1: SCANNER ---
 with tab1:
@@ -137,7 +137,6 @@ with tab1:
                         salva_db(pd.concat([df_attuale, nuova], ignore_index=True)); st.rerun()
                     st.divider()
             except: continue
-        if found == 0: st.warning("Nessuna quota disponibile per i filtri impostati.")
 
 # --- TAB 2: PORTAFOGLIO ---
 with tab2:
@@ -145,18 +144,55 @@ with tab2:
     if not df_p.empty:
         for i, r in df_p.iterrows():
             with st.expander(f"📅 {r['Data Match']} | {r['Match']} | {r['Stake']}€"):
-                st.write(f"🎯 {r['Scelta']} @{r['Quota']} su {r['Bookmaker']}")
                 b1, b2, b3 = st.columns(3)
                 if b1.button("VINTO ✅", key=f"v_{i}"): chiudi_gara(i, "VINTO")
                 if b2.button("PERSO ❌", key=f"p_{i}"): chiudi_gara(i, "PERSO")
                 if b3.button("ELIMINA 🗑️", key=f"e_{i}"): salva_db(df_attuale.drop(i)); st.rerun()
     else: st.info("Nessuna giocata in corso.")
 
-# --- TAB 3: FISCALE ---
+# --- TAB 3: DASHBOARD FISCALE ---
 with tab3:
     df_chiuse = df_attuale[df_attuale['Esito'].isin(["VINTO", "PERSO"])].copy()
     if not df_chiuse.empty:
-        st.metric("Profitto Totale", f"{round(pd.to_numeric(df_chiuse['Profitto']).sum(), 2)} €")
-        st.dataframe(df_chiuse)
+        df_chiuse['Profitto'] = pd.to_numeric(df_chiuse['Profitto'])
+        df_chiuse['Stake'] = pd.to_numeric(df_chiuse['Stake'])
+        df_chiuse['Quota'] = pd.to_numeric(df_chiuse['Quota'])
+        
+        # Calcoli di Testata
+        tot_stake = df_chiuse['Stake'].sum()
+        net_profit = df_chiuse['Profitto'].sum()
+        # Il totale vinto include lo stake restituito nelle vincite
+        tot_vinto = df_chiuse[df_chiuse['Esito'] == "VINTO"].apply(lambda x: x['Stake'] * x['Quota'], axis=1).sum()
+        mancante = max(0.0, OBIETTIVO_TARGET - net_profit)
+        percentuale = min(100, int((net_profit / OBIETTIVO_TARGET) * 100)) if net_profit > 0 else 0
+
+        # Visualizzazione Metriche
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Totale Scommesso", f"{round(tot_stake, 2)} €")
+        m2.metric("Totale Vinto (Lordo)", f"{round(tot_vinto, 2)} €")
+        m3.metric("Profitto Netto", f"{round(net_profit, 2)} €", delta=f"{percentuale}%")
+        m4.metric("Manca al Target", f"{round(mancante, 2)} €")
+        
+        st.progress(percentuale/100, text=f"Progresso Obiettivo: {percentuale}%")
+        st.divider()
+
+        # Griglia Colorata
+        for i, r in df_chiuse[::-1].iterrows():
+            colore = "#d4edda" if r['Esito'] == "VINTO" else "#f8d7da"
+            bordo = "#28a745" if r['Esito'] == "VINTO" else "#dc3545"
+            testo = "#155724" if r['Esito'] == "VINTO" else "#721c24"
+            
+            st.markdown(f"""
+                <div style="background-color:{colore}; border: 1px solid {bordo}; padding:15px; border-radius:10px; margin-bottom:10px; color:{testo};">
+                    <div style="display:flex; justify-content:space-between;">
+                        <b>{r['Data Match']} - {r['Match']}</b>
+                        <b>{r['Esito']}</b>
+                    </div>
+                    <div>Scelta: {r['Scelta']} @{r['Quota']} | Stake: {r['Stake']}€ | <b>Profitto: {r['Profitto']}€</b></div>
+                </div>
+            """, unsafe_allow_html=True)
+    else:
+        st.info("Nessuna giocata chiusa disponibile per le statistiche.")
+    
     st.divider()
-    st.download_button("📥 Scarica Backup CSV", df_attuale.to_csv(index=False), "backup_sniper.csv")
+    st.download_button("📥 Scarica Backup CSV", df_attuale.to_csv(index=False), "sniper_fiscale.csv", use_container_width=True)

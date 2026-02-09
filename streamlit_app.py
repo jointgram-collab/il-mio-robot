@@ -133,36 +133,35 @@ with tab1:
                                     options.append({"T": lbl, "Q": q, "V": val, "BK": bk['title']})
                 if options:
                     found += 1
-                    # Ordiniamo i bookmaker dal valore più alto al più basso
-                    options = sorted(options, key=lambda x: x['V'], reverse=True)
-                    
-                    # Creiamo un contenitore per il match
+                    # --- NUOVA LOGICA: RAGGRUPPAMENTO PER ESITO ---
+                    # Creiamo un dizionario per tenere solo la quota migliore per ogni esito (es. "1", "X", "2")
+                    best_by_outcome = {}
+                    for opt in options:
+                        label = opt['T']
+                        if label not in best_by_outcome or opt['Q'] > best_by_outcome[label]['Q']:
+                            best_by_outcome[label] = opt
+
                     with st.container():
-                        st.write(f"📅 {dt.strftime('%d/%m %H:%M')} | **{nome}**")
+                        st.markdown(f"#### 📅 {dt.strftime('%d/%m %H:%M')} | {nome}")
                         
-                        for opt in options:
-                            # Mostriamo solo i bookmaker che hanno valore positivo o i top 3
+                        # Mostriamo una riga pulita per ogni esito possibile
+                        for label in best_by_outcome:
+                            opt = best_by_outcome[label]
                             stk = round(max(2.0, min(budget_cassa * (opt['V']/(opt['Q']-1)) * rischio_kelly, budget_cassa*0.15)), 2)
                             
-                            c1, c2, c3, c4 = st.columns([0.5, 2.5, 2.5, 1])
-                            # c1 è vuoto per creare rientro visivo
-                            c2.write(f"🎯 {opt['T']} @**{opt['Q']}**")
-                            c3.write(f"🏦 **{opt['BK']}** (Valore: {round(opt['V']*100,1)}%)")
+                            c1, c2, c3, c4 = st.columns([2.5, 2, 2, 1])
                             
-                            if (nome, opt['T']) in giocate_esistenti:
-                                c4.button("✅", key=f"ok_{nome}_{opt['T']}_{opt['BK']}", disabled=True)
-                            elif c4.button("ADD", key=f"add_{nome}_{opt['BK']}_{found}_{opt['Q']}"):
+                            c1.markdown(f"🎯 **{label}**")
+                            c2.markdown(f"💰 Quota: **{opt['Q']}**")
+                            c3.markdown(f"🏛️ **{opt['BK']}** ({round(opt['V']*100,1)}%)")
+                            
+                            if (nome, label) in giocate_esistenti:
+                                c4.button("✅", key=f"ok_{nome}_{label}_{found}", disabled=True)
+                            elif c4.button("ADD", key=f"add_{nome}_{label}_{found}_{opt['BK']}"):
                                 nuova = pd.DataFrame([{
-                                    "Data Match": dt.strftime('%d/%m %H:%M'), 
-                                    "Match": nome, 
-                                    "Scelta": opt['T'], 
-                                    "Quota": opt['Q'], 
-                                    "Stake": stk, 
-                                    "Bookmaker": opt['BK'], 
-                                    "Esito": "Pendente", 
-                                    "Profitto": 0.0, 
-                                    "Sport_Key": m['sport_key'], 
-                                    "Risultato": "-"
+                                    "Data Match": dt.strftime('%d/%m %H:%M'), "Match": nome, "Scelta": label, 
+                                    "Quota": opt['Q'], "Stake": stk, "Bookmaker": opt['BK'], 
+                                    "Esito": "Pendente", "Profitto": 0.0, "Sport_Key": m['sport_key'], "Risultato": "-"
                                 }])
                                 salva_db(pd.concat([df_attuale, nuova], ignore_index=True))
                                 st.rerun()

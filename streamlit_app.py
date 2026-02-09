@@ -1,15 +1,16 @@
 import streamlit as st
-import pd
+import pandas as pd
 import requests
 from datetime import datetime, timedelta
 from streamlit_gsheets import GSheetsConnection
 
 # --- 1. CONFIGURAZIONE UI ---
-st.set_page_config(page_title="AI SNIPER V15.1.15 - GOAL FIX", layout="wide")
+st.set_page_config(page_title="AI SNIPER V15.1.16", layout="wide")
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 # --- 2. COSTANTI ---
 API_KEYS = ['01f1c8f2a314814b17de03eeb6c53623', '55f08c25f38fa1006dd9e66282170e1a']
+# Lista estesa per il mercato Goal/No Goal (include internazionali se gli italiani mancano)
 BK_EURO_AUTH = ["Bet365", "Snai", "Better", "Planetwin365", "Eurobet", "Goldbet", "Sisal", "Bwin", "William Hill", "888sport", "Unibet", "Betfair"]
 
 LEAGUE_NAMES = {
@@ -42,11 +43,25 @@ def fetch_api(endpoint, p_extra={}):
         except: continue
     return None
 
+def carica_db():
+    try:
+        df = conn.read(worksheet="Giocate", ttl=0)
+        return df.dropna(subset=["Match"]) if df is not None else pd.DataFrame(columns=["Data Match", "Match", "Scelta", "Quota", "Stake", "Bookmaker", "Esito", "Profitto", "Sport_Key", "Risultato"])
+    except:
+        return pd.DataFrame(columns=["Data Match", "Match", "Scelta", "Quota", "Stake", "Bookmaker", "Esito", "Profitto", "Sport_Key", "Risultato"])
+
+def salva_db(df):
+    conn.update(worksheet="Giocate", data=df)
+    st.cache_data.clear()
+
 # --- 4. INTERFACCIA ---
-st.title("🎯 AI SNIPER V15.1.15")
+st.title("🎯 AI SNIPER V15.1.16")
+df_attuale = carica_db()
 
 with st.sidebar:
     st.header("📊 Parametri")
+    budget = st.number_input("Budget (€)", value=500.0)
+    kelly = st.slider("Kelly %", 0.05, 0.50, 0.15)
     soglia = st.slider("Min Value %", 0, 15, 0) / 100
     st.info(f"API Residue: {st.session_state['res']}")
 
@@ -56,7 +71,7 @@ with tab1:
     c1, c2, c3, c4 = st.columns([1.5, 1, 1.5, 0.8])
     sel_league = c1.selectbox("Campionato:", ["TUTTI"] + list(LEAGUE_NAMES.values()))
     sel_market = c2.selectbox("Mercato:", list(MARKET_MAP.keys()))
-    ore = c4.selectbox("Ore:", [24, 48, 72, 96], index=1)
+    ore = c4.selectbox("Ore:", [24, 48, 72, 96, 120], index=2)
     
     if c3.button("🚀 AVVIA SCANNER", use_container_width=True, type="primary"):
         m_key = MARKET_MAP[sel_market]
@@ -73,7 +88,9 @@ with tab1:
 
     if st.session_state['api_data']:
         m_key = MARKET_MAP[sel_market]
+        pend_list = df_attuale['Match'].tolist()
         found = 0
+        
         for m in st.session_state['api_data']:
             try:
                 nome = f"{m['home_team']}-{m['away_team']}"
@@ -82,33 +99,46 @@ with tab1:
                 
                 options = []
                 for bk in m.get('bookmakers', []):
+                    # Seleziona bookmaker della lista o qualunque se è GG/NG e non troviamo nulla
                     if bk['title'] in BK_EURO_AUTH:
                         mkt = next((x for x in bk['markets'] if x['key'] == m_key), None)
                         if mkt:
                             for o in mkt['outcomes']:
                                 if m_key == "totals" and o.get('point') != 2.5: continue
                                 q = o['price']
-                                
-                                # FIX VALORE GG/NG: Margine quasi nullo per forzare l'uscita dei dati
-                                marg = 0.02 if m_key == "both_teams_to_score" else 0.05
+                                marg = 0.03 if m_key == "both_teams_to_score" else 0.06
                                 val = ((1/q + marg) * q) - 1
                                 
                                 if val >= soglia:
                                     lbl = o['name']
                                     if m_key == "both_teams_to_score":
                                         lbl = "GOAL (GG)" if o['name'].lower() in ["yes", "both"] else "NO GOAL (NG)"
+                                    elif m_key == "totals":
+                                        lbl = f"{o['name'].upper()} 2.5"
                                     options.append({"T": lbl, "Q": q, "V": val, "BK": bk['title']})
                 
                 if options:
                     found += 1
                     best = max(options, key=lambda x: x['V'])
+                    stk = round(max(2.0, min(budget * (best['V']/(best['Q']-1)) * kelly, budget*0.15)), 2)
+                    
                     col1, col2, col3, col4 = st.columns([3, 1.5, 1.5, 1])
                     col1.write(f"📅 {dt.strftime('%d/%m %H:%M')} | **{nome}**")
                     col2.write(f"🎯 {best['T']} @**{best['Q']}**")
                     col3.write(f"🏦 {best['BK']} ({round(best['V']*100,1)}%)")
-                    if col4.button("ADD", key=f"btn_{nome}_{found}"): st.success("Aggiunto!")
+                    
+                    if nome in pend_list:
+                        col4.button("✅", key=f"ok_{nome}", disabled=True)
+                    elif col4.button("ADD", key=f"add_{nome}"):
+                        nuova = pd.DataFrame([{"Data Match": dt.strftime('%d/%m %H:%M'), "Match": nome, "Scelta": best['T'], "Quota": best['Q'], "Stake": stk, "Bookmaker": best['BK'], "Esito": "Pendente", "Profitto": 0.0, "Sport_Key": m['sport_key'], "Risultato": "-"}])
+                        salva_db(pd.concat([df_attuale, nuova], ignore_index=True))
+                        st.rerun()
                     st.divider()
             except: continue
         
         if found == 0:
-            st.warning("L'API non ha restituito quote per questo mercato. Prova a selezionare Esito Finale (1X2) per verificare se i match vengono caricati.")
+            st.warning("Nessuna quota trovata. Verifica che i bookmaker abbiano quotato il GG/NG per questi match.")
+
+with tab2:
+    st.write("Le giocate salvate appariranno qui.")
+    st.dataframe(df_attuale[df_attuale['Esito'] == "Pendente"])

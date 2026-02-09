@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from streamlit_gsheets import GSheetsConnection
 
 # --- 1. CONFIGURAZIONE UI ---
-st.set_page_config(page_title="AI SNIPER V15.1.20", layout="wide")
+st.set_page_config(page_title="AI SNIPER V15.1.21", layout="wide")
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 # --- 2. COSTANTI ---
@@ -67,7 +67,7 @@ def chiudi_gara(idx, esito, risultato_score="-"):
         salva_db(df); st.rerun()
 
 # --- 4. INTERFACCIA ---
-st.title("🎯 AI SNIPER V15.1.20")
+st.title("🎯 AI SNIPER V15.1.21")
 df_attuale = carica_db()
 
 with st.sidebar:
@@ -156,43 +156,36 @@ with tab3:
     if not df_chiuse.empty:
         df_chiuse['Profitto'] = pd.to_numeric(df_chiuse['Profitto'])
         df_chiuse['Stake'] = pd.to_numeric(df_chiuse['Stake'])
-        df_chiuse['Quota'] = pd.to_numeric(df_chiuse['Quota'])
         
-        # Calcoli di Testata
-        tot_stake = df_chiuse['Stake'].sum()
-        net_profit = df_chiuse['Profitto'].sum()
-        # Il totale vinto include lo stake restituito nelle vincite
-        tot_vinto = df_chiuse[df_chiuse['Esito'] == "VINTO"].apply(lambda x: x['Stake'] * x['Quota'], axis=1).sum()
-        mancante = max(0.0, OBIETTIVO_TARGET - net_profit)
-        percentuale = min(100, int((net_profit / OBIETTIVO_TARGET) * 100)) if net_profit > 0 else 0
-
-        # Visualizzazione Metriche
+        # Testata compatta
         m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Totale Scommesso", f"{round(tot_stake, 2)} €")
-        m2.metric("Totale Vinto (Lordo)", f"{round(tot_vinto, 2)} €")
-        m3.metric("Profitto Netto", f"{round(net_profit, 2)} €", delta=f"{percentuale}%")
-        m4.metric("Manca al Target", f"{round(mancante, 2)} €")
+        net_profit = df_chiuse['Profitto'].sum()
+        mancante = max(0.0, OBIETTIVO_TARGET - net_profit)
+        perc = min(100, int((net_profit / OBIETTIVO_TARGET) * 100)) if net_profit > 0 else 0
         
-        st.progress(percentuale/100, text=f"Progresso Obiettivo: {percentuale}%")
-        st.divider()
-
-        # Griglia Colorata
+        m1.metric("Scommesso", f"{round(df_chiuse['Stake'].sum(), 2)}€")
+        m2.metric("Profitto Netto", f"{round(net_profit, 2)}€")
+        m3.metric("Progresso", f"{perc}%")
+        m4.metric("Mancante", f"{round(mancante, 2)}€")
+        
+        st.progress(perc/100)
+        st.markdown("### 📜 Storico Giocate")
+        
+        # Griglia super compatta
         for i, r in df_chiuse[::-1].iterrows():
-            colore = "#d4edda" if r['Esito'] == "VINTO" else "#f8d7da"
-            bordo = "#28a745" if r['Esito'] == "VINTO" else "#dc3545"
-            testo = "#155724" if r['Esito'] == "VINTO" else "#721c24"
+            # Stile in base all'esito
+            icon, bg, border, txt = ("✅", "#e6ffed", "#34d058", "#155724") if r['Esito'] == "VINTO" else ("❌", "#ffeef0", "#f97583", "#721c24")
             
             st.markdown(f"""
-                <div style="background-color:{colore}; border: 1px solid {bordo}; padding:15px; border-radius:10px; margin-bottom:10px; color:{testo};">
-                    <div style="display:flex; justify-content:space-between;">
-                        <b>{r['Data Match']} - {r['Match']}</b>
-                        <b>{r['Esito']}</b>
+                <div style="background-color:{bg}; border-left: 5px solid {border}; padding: 6px 12px; border-radius: 4px; margin-bottom: 4px; color:{txt}; font-size: 0.9rem;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span>{icon} <b>{r['Match']}</b> ({r['Data Match']})</span>
+                        <span>{r['Scelta']} @{r['Quota']} | <b>{r['Profitto']}€</b></span>
                     </div>
-                    <div>Scelta: {r['Scelta']} @{r['Quota']} | Stake: {r['Stake']}€ | <b>Profitto: {r['Profitto']}€</b></div>
                 </div>
             """, unsafe_allow_html=True)
     else:
-        st.info("Nessuna giocata chiusa disponibile per le statistiche.")
+        st.info("Nessuna giocata chiusa.")
     
     st.divider()
-    st.download_button("📥 Scarica Backup CSV", df_attuale.to_csv(index=False), "sniper_fiscale.csv", use_container_width=True)
+    st.download_button("📥 Backup CSV", df_attuale.to_csv(index=False), "sniper_data.csv", use_container_width=True)

@@ -133,19 +133,40 @@ with tab1:
                                     options.append({"T": lbl, "Q": q, "V": val, "BK": bk['title']})
                 if options:
                     found += 1
-                    best = max(options, key=lambda x: x['V'])
-                    stk = round(max(2.0, min(budget_cassa * (best['V']/(best['Q']-1)) * rischio_kelly, budget_cassa*0.15)), 2)
-                    col1, col2, col3, col4 = st.columns([3, 1.5, 1.5, 1])
-                    col1.write(f"📅 {dt.strftime('%d/%m %H:%M')} | **{nome}**")
-                    col2.write(f"🎯 {best['T']} @**{best['Q']}**")
-                    col3.write(f"🏦 {best['BK']} ({round(best['V']*100,1)}%)")
+                    # Ordiniamo i bookmaker dal valore più alto al più basso
+                    options = sorted(options, key=lambda x: x['V'], reverse=True)
                     
-                    if (nome, best['T']) in giocate_esistenti:
-                        col4.button("✅", key=f"ok_{nome}_{best['T']}", disabled=True)
-                    elif col4.button("ADD", key=f"add_{nome}_{found}"):
-                        nuova = pd.DataFrame([{"Data Match": dt.strftime('%d/%m %H:%M'), "Match": nome, "Scelta": best['T'], "Quota": best['Q'], "Stake": stk, "Bookmaker": best['BK'], "Esito": "Pendente", "Profitto": 0.0, "Sport_Key": m['sport_key'], "Risultato": "-"}])
-                        salva_db(pd.concat([df_attuale, nuova], ignore_index=True)); st.rerun()
-                    st.divider()
+                    # Creiamo un contenitore per il match
+                    with st.container():
+                        st.write(f"📅 {dt.strftime('%d/%m %H:%M')} | **{nome}**")
+                        
+                        for opt in options:
+                            # Mostriamo solo i bookmaker che hanno valore positivo o i top 3
+                            stk = round(max(2.0, min(budget_cassa * (opt['V']/(opt['Q']-1)) * rischio_kelly, budget_cassa*0.15)), 2)
+                            
+                            c1, c2, c3, c4 = st.columns([0.5, 2.5, 2.5, 1])
+                            # c1 è vuoto per creare rientro visivo
+                            c2.write(f"🎯 {opt['T']} @**{opt['Q']}**")
+                            c3.write(f"🏦 **{opt['BK']}** (Valore: {round(opt['V']*100,1)}%)")
+                            
+                            if (nome, opt['T']) in giocate_esistenti:
+                                c4.button("✅", key=f"ok_{nome}_{opt['T']}_{opt['BK']}", disabled=True)
+                            elif c4.button("ADD", key=f"add_{nome}_{opt['BK']}_{found}_{opt['Q']}"):
+                                nuova = pd.DataFrame([{
+                                    "Data Match": dt.strftime('%d/%m %H:%M'), 
+                                    "Match": nome, 
+                                    "Scelta": opt['T'], 
+                                    "Quota": opt['Q'], 
+                                    "Stake": stk, 
+                                    "Bookmaker": opt['BK'], 
+                                    "Esito": "Pendente", 
+                                    "Profitto": 0.0, 
+                                    "Sport_Key": m['sport_key'], 
+                                    "Risultato": "-"
+                                }])
+                                salva_db(pd.concat([df_attuale, nuova], ignore_index=True))
+                                st.rerun()
+                        st.divider()
             except: continue
 
 # --- TAB 2: PORTAFOGLIO ---

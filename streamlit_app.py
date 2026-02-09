@@ -2,114 +2,72 @@ import streamlit as st
 import pandas as pd
 import requests
 from datetime import datetime, timedelta
-from streamlit_gsheets import GSheetsConnection
 
-# --- 1. CONFIGURAZIONE UI ---
-st.set_page_config(page_title="AI SNIPER V15.1.17", layout="wide")
-conn = st.connection("gsheets", type=GSheetsConnection)
+# --- CONFIGURAZIONE ---
+st.set_page_config(page_title="AI SNIPER V15.1.18", layout="wide")
 
-# --- 2. COSTANTI ---
 API_KEYS = ['01f1c8f2a314814b17de03eeb6c53623', '55f08c25f38fa1006dd9e66282170e1a']
-# Lista base (che verrà ignorata se non si trovano risultati GG/NG)
-BK_EURO_AUTH = ["Bet365", "Snai", "Better", "Planetwin365", "Eurobet", "Goldbet", "Sisal", "Bwin", "William Hill", "888sport", "Unibet", "Betfair"]
+LEAGUE_KEYS = [
+    "soccer_italy_serie_a", "soccer_italy_serie_b", "soccer_epl", 
+    "soccer_spain_la_liga", "soccer_germany_bundesliga", "soccer_france_ligue_1"
+]
 
-LEAGUE_NAMES = {
-    "soccer_italy_serie_a": "🇮🇹 Serie A", "soccer_italy_serie_b": "🇮🇹 Serie B",
-    "soccer_epl": "🏴󠁧󠁢󠁥󠁮󠁧󠁿 Premier League", "soccer_netherlands_eredivisie": "🇳🇱 Eredivisie",
-    "soccer_spain_la_liga": "🇪🇸 La Liga", "soccer_germany_bundesliga": "🇩🇪 Bundesliga",
-    "soccer_france_ligue_1": "🇫🇷 Ligue 1", "soccer_uefa_europa_league": "🇪🇺 Europa League",
-    "soccer_uefa_champions_league": "🏆 Champions"
-}
+if 'data_raw' not in st.session_state: st.session_state['data_raw'] = []
+if 'status' not in st.session_state: st.session_state['status'] = "Pronto"
 
-MARKET_MAP = {
-    "Goal/No Goal": "both_teams_to_score",
-    "Under/Over 2.5": "totals",
-    "Esito Finale (1X2)": "h2h"
-}
+# --- LOGICA API ---
+def scarica_dati(market):
+    results = []
+    for key in API_KEYS:
+        for league in LEAGUE_KEYS:
+            url = f"https://api.the-odds-api.com/v4/sports/{league}/odds/"
+            params = {'api_key': key, 'regions': 'eu', 'markets': market, 'oddsFormat': 'decimal'}
+            try:
+                r = requests.get(url, params=params, timeout=5)
+                if r.status_code == 200:
+                    data = r.json()
+                    results.extend(data)
+                    st.session_state['status'] = f"OK - Residue: {r.headers.get('x-requests-remaining')}"
+            except: continue
+        if results: break 
+    return results
 
-if 'api_data' not in st.session_state: st.session_state['api_data'] = []
-if 'res' not in st.session_state: st.session_state['res'] = "Verifica..."
-
-# --- 3. FUNZIONE CHIAMATA ---
-def fetch_api(endpoint, p_extra={}):
-    for k in API_KEYS:
-        p = {'api_key': k, 'regions': 'eu', 'oddsFormat': 'decimal'}
-        p.update(p_extra)
-        try:
-            r = requests.get(endpoint, params=p, timeout=12)
-            if r.status_code == 200:
-                st.session_state['res'] = r.headers.get('x-requests-remaining', "N/D")
-                return r.json()
-        except: continue
-    return None
-
-# --- 4. INTERFACCIA ---
-st.title("🎯 AI SNIPER V15.1.17")
+# --- INTERFACCIA ---
+st.title("🎯 AI SNIPER V15.1.18 - DEBUG MODE")
 
 with st.sidebar:
-    st.header("📊 Parametri")
-    soglia = st.slider("Min Value %", 0, 15, 0) / 100
-    st.info(f"API Residue: {st.session_state['res']}")
+    st.write(f"**Stato API:** {st.session_state['status']}")
+    ore_limite = st.slider("Fino a ore:", 12, 168, 72)
+    min_val = st.slider("Min Value %", 0, 10, 0)
 
-tab1, tab2 = st.tabs(["🔍 SCANNER", "💼 PORTAFOGLIO"])
+m_scelto = st.selectbox("Seleziona Mercato per Test:", ["both_teams_to_score", "h2h", "totals"])
 
-with tab1:
-    c1, c2, c3, c4 = st.columns([1.5, 1, 1.5, 0.8])
-    sel_league = c1.selectbox("Campionato:", ["TUTTI"] + list(LEAGUE_NAMES.values()))
-    sel_market = c2.selectbox("Mercato:", list(MARKET_MAP.keys()))
-    ore = c4.selectbox("Fino a (Ore):", [24, 48, 72, 96, 120, 168], index=3) # Aggiunta una settimana intera
-    
-    if c3.button("🚀 AVVIA SCANNER", use_container_width=True, type="primary"):
-        m_key = MARKET_MAP[sel_market]
-        l_keys = [k for k, v in LEAGUE_NAMES.items() if v == sel_league or sel_league == "TUTTI"]
-        
-        all_matches = []
-        bar = st.progress(0)
-        for i, lk in enumerate(l_keys):
-            data = fetch_api(f'https://api.the-odds-api.com/v4/sports/{lk}/odds/', {'markets': m_key})
-            if data: all_matches.extend(data)
-            bar.progress((i+1)/len(l_keys))
-        st.session_state['api_data'] = all_matches
-        st.rerun()
+if st.button("🔥 FORZA SCANSIONE TOTALE", type="primary", use_container_width=True):
+    with st.spinner("Estrazione dati in corso..."):
+        st.session_state['data_raw'] = scarica_dati(m_scelto)
+    st.rerun()
 
-    if st.session_state['api_data']:
-        m_key = MARKET_MAP[sel_market]
-        found = 0
-        
-        st.write(f"Analizzando **{len(st.session_state['api_data'])}** eventi totali...")
-        
-        for m in st.session_state['api_data']:
-            try:
-                nome = f"{m['home_team']}-{m['away_team']}"
-                dt = datetime.strptime(m['commence_time'], "%Y-%m-%dT%H:%M:%SZ")
-                if dt > datetime.utcnow() + timedelta(hours=ore): continue
-                
-                options = []
-                for bk in m.get('bookmakers', []):
-                    # FORZATURA: Se è GG/NG e non troviamo nulla coi soliti, apriamo a tutti i bookmaker
-                    mkt = next((x for x in bk['markets'] if x['key'] == m_key), None)
-                    if mkt:
+# --- DISPLAY ---
+if st.session_state['data_raw']:
+    st.write(f"Trovati {len(st.session_state['data_raw'])} match grezzi. Analisi quote...")
+    for m in st.session_state['data_raw']:
+        try:
+            match_name = f"{m['home_team']} vs {m['away_team']}"
+            for bk in m['bookmakers']:
+                for mkt in bk['markets']:
+                    if mkt['key'] == m_scelto:
                         for o in mkt['outcomes']:
-                            if m_key == "totals" and o.get('point') != 2.5: continue
-                            q = o['price']
-                            val = ((1/q + 0.02) * q) - 1 # Margine ridottissimo per test
+                            # Traduzione rapida per visualizzazione
+                            scelta = o['name']
+                            if m_scelto == "both_teams_to_score":
+                                scelta = "GOAL (GG)" if o['name'].lower() in ["yes", "both"] else "NO GOAL (NG)"
                             
-                            if val >= soglia:
-                                lbl = o['name']
-                                if m_key == "both_teams_to_score":
-                                    lbl = "GOAL (GG)" if o['name'].lower() in ["yes", "both"] else "NO GOAL (NG)"
-                                options.append({"T": lbl, "Q": q, "V": val, "BK": bk['title']})
-                
-                if options:
-                    found += 1
-                    best = max(options, key=lambda x: x['V'])
-                    col1, col2, col3, col4 = st.columns([3, 1.5, 1.5, 1])
-                    col1.write(f"📅 {dt.strftime('%d/%m %H:%M')} | **{nome}**")
-                    col2.write(f"🎯 {best['T']} @**{best['Q']}**")
-                    col3.write(f"🏦 {best['BK']} ({round(best['V']*100,1)}%)")
-                    col4.button("ADD", key=f"add_{nome}_{found}")
-                    st.divider()
-            except: continue
-        
-        if found == 0:
-            st.warning("⚠️ Nessuna quota trovata nemmeno tra i bookmaker internazionali. È probabile che i dati non siano ancora disponibili nell'API per le date selezionate.")
+                            col1, col2, col3 = st.columns([3, 1, 1])
+                            col1.write(f"🏟️ {match_name}")
+                            col2.write(f"🎯 **{scelta}**")
+                            col3.write(f"🏦 {bk['title']} @**{o['price']}**")
+            st.divider()
+        except: continue
+else:
+    st.warning("Nessun dato presente. Clicca sul tasto rosso sopra.")
+    

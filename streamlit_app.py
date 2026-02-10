@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from streamlit_gsheets import GSheetsConnection
 
 # --- 1. CONFIGURAZIONE UI ---
-st.set_page_config(page_title="AI SNIPER V15.1.28 - COMPLETE", layout="wide")
+st.set_page_config(page_title="AI SNIPER V15.1.29 - COMPLETE", layout="wide")
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 # --- 2. COSTANTI E DEFAULT ---
@@ -68,7 +68,7 @@ def chiudi_gara(idx, esito, risultato_score="-"):
         salva_db(df); st.rerun()
 
 # --- 4. INTERFACCIA ---
-st.title("🎯 AI SNIPER V15.1.28")
+st.title("🎯 AI SNIPER V15.1.29")
 df_attuale = carica_db()
 
 with st.sidebar:
@@ -148,10 +148,19 @@ with tab1:
                     st.divider()
             except: continue
 
-# --- TAB 2: PORTAFOGLIO ---
+# --- TAB 2: PORTAFOGLIO (CON TOTALI) ---
 with tab2:
     df_p = df_attuale[df_attuale['Esito'] == "Pendente"].copy()
     if not df_p.empty:
+        # Calcolo dei Totali Pendenti
+        tot_impegnato = df_p['Stake'].astype(float).sum()
+        tot_potenziale = (df_p['Stake'].astype(float) * df_p['Quota'].astype(float)).sum()
+        
+        c_p1, c_p2 = st.columns(2)
+        c_p1.metric("Totale Impegnato 💸", f"{round(tot_impegnato, 2)}€")
+        c_p2.metric("Vincita Potenziale Lorda 🏆", f"{round(tot_potenziale, 2)}€")
+        st.divider()
+
         if st.button("🔄 AGGIORNA RISULTATI", use_container_width=True, type="primary"):
             for idx, r in df_p.iterrows():
                 scores = fetch_api(f"https://api.the-odds-api.com/v4/sports/{r['Sport_Key']}/scores/", {"daysFrom": 1})
@@ -207,4 +216,4 @@ with tab3:
             st.markdown(f"""<div style="background-color:{bg}; border-left: 5px solid {border}; padding: 8px; border-radius: 4px; margin-bottom: 5px; color:{txt};">
                 <b>{icon} {r['Match']}</b> | {r['Scelta']} @{r['Quota']} | Res: {r.get('Risultato','-')} | <b>{r['Profitto']}€</b>
             </div>""", unsafe_allow_html=True)
-    else: st.info("Inizia a scansionare e aggiungere giocate!")
+    else: st.info("Aggiungi giocate per visualizzare le metriche fiscali.")

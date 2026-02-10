@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from streamlit_gsheets import GSheetsConnection
 
 # --- 1. CONFIGURAZIONE UI ---
-st.set_page_config(page_title="AI SNIPER V15.1.26 - GROWTH MODE", layout="wide")
+st.set_page_config(page_title="AI SNIPER V15.1.27 - PROFESSIONAL", layout="wide")
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 # --- 2. COSTANTI E DEFAULT ---
@@ -68,15 +68,13 @@ def chiudi_gara(idx, esito, risultato_score="-"):
         salva_db(df); st.rerun()
 
 # --- 4. INTERFACCIA ---
-st.title("🎯 AI SNIPER V15.1.26")
+st.title("🎯 AI SNIPER V15.1.27")
 df_attuale = carica_db()
 
 with st.sidebar:
     st.header("📊 Piano 30 Giorni")
-    # Budget e parametri impostati sui tuoi valori salvati
     budget_cassa = st.number_input("Budget Attuale (€)", value=500.0)
-    # Default ottimizzati per il tuo obiettivo
-    rischio_kelly = st.slider("Aggressività Kelly", 0.05, 0.50, 0.10, help="Impostato a 0.10 per bilanciare crescita e sicurezza.")
+    rischio_kelly = st.slider("Aggressività Kelly", 0.05, 0.50, 0.10)
     soglia_valore = st.slider("Min Value %", 0, 15, 3) / 100
     st.divider()
     st.info(f"💳 API Residue: **{st.session_state['api_usage']['remaining']}**")
@@ -98,7 +96,11 @@ with tab1:
         bar = st.progress(0)
         for i, lk in enumerate(l_keys):
             data = fetch_api(f'https://api.the-odds-api.com/v4/sports/{lk}/odds/', {'markets': m_key})
-            if data: all_matches.extend(data)
+            if data:
+                # Aggiungiamo il nome del campionato a ogni match per la visualizzazione
+                for match in data:
+                    match['league_label'] = LEAGUE_NAMES.get(lk, lk)
+                all_matches.extend(data)
             bar.progress((i+1)/len(l_keys))
         st.session_state['api_data'] = all_matches
         st.rerun()
@@ -110,6 +112,7 @@ with tab1:
         for m in st.session_state['api_data']:
             try:
                 nome = f"{m['home_team']}-{m['away_team']}"
+                lega = m.get('league_label', 'N/D')
                 dt = datetime.strptime(m['commence_time'], "%Y-%m-%dT%H:%M:%SZ")
                 if dt > datetime.utcnow() + timedelta(hours=ore): continue
                 
@@ -136,10 +139,11 @@ with tab1:
                     # Calcolo Stake Kelly
                     stk = round(max(2.0, min(budget_cassa * (best_signal['V']/(best_signal['Q']-1)) * rischio_kelly, budget_cassa*0.12)), 2)
                     
-                    col1, col2, col3, col4 = st.columns([3, 1.5, 1.5, 1])
-                    col1.write(f"📅 {dt.strftime('%d/%m %H:%M')} | **{nome}**")
-                    col2.write(f"🎯 **{best_signal['T']}** @**{best_signal['Q']}**")
-                    col3.write(f"🏛️ {best_signal['BK']} ({round(best_signal['V']*100,1)}%)")
+                    # Layout Scanner aggiornato con Lega e Stake
+                    col1, col2, col3, col4 = st.columns([2.5, 1.8, 1.7, 1])
+                    col1.write(f"{lega}\n**{nome}**")
+                    col2.write(f"🎯 **{best_signal['T']}** @**{best_signal['Q']}**\n💰 Stake: **{stk}€**")
+                    col3.write(f"🏛️ {best_signal['BK']}\n📈 Val: {round(best_signal['V']*100,1)}%")
                     
                     if (nome, best_signal['T']) in giocate_esistenti:
                         col4.button("✅", key=f"ok_{nome}_{found}", disabled=True)
@@ -152,71 +156,3 @@ with tab1:
                         salva_db(pd.concat([df_attuale, nuova], ignore_index=True)); st.rerun()
                     st.divider()
             except: continue
-
-# --- TAB 2: PORTAFOGLIO ---
-with tab2:
-    df_p = df_attuale[df_attuale['Esito'] == "Pendente"].copy()
-    if not df_p.empty:
-        if st.button("🔄 AGGIORNA RISULTATI", use_container_width=True, type="primary"):
-            for idx, r in df_p.iterrows():
-                scores = fetch_api(f"https://api.the-odds-api.com/v4/sports/{r['Sport_Key']}/scores/", {"daysFrom": 1})
-                if scores:
-                    match_data = next((s for s in scores if f"{s['home_team']}-{s['away_team']}" == r['Match']), None)
-                    if match_data and match_data.get('completed'):
-                        s = match_data['scores']
-                        h_score = int(next(x['score'] for x in s if x['name'] == match_data['home_team']))
-                        a_score = int(next(x['score'] for x in s if x['name'] == match_data['away_team']))
-                        res_str = f"{h_score}-{a_score}"
-                        vittoria = False
-                        sc = r['Scelta']
-                        if sc == "GOAL (GG)": vittoria = (h_score > 0 and a_score > 0)
-                        elif sc == "NO GOAL (NG)": vittoria = (h_score == 0 or a_score == 0)
-                        elif "OVER" in sc: vittoria = (h_score + a_score > 2.5)
-                        elif "UNDER" in sc: vittoria = (h_score + a_score < 2.5)
-                        elif sc == match_data['home_team']: vittoria = (h_score > a_score)
-                        elif sc == match_data['away_team']: vittoria = (a_score > h_score)
-                        elif sc == "Draw": vittoria = (h_score == a_score)
-                        chiudi_gara(idx, "VINTO" if vittoria else "PERSO", res_str)
-            st.rerun()
-
-        for i, r in df_p.iterrows():
-            with st.expander(f"📅 {r['Data Match']} | {r['Match']} | {r['Stake']}€"):
-                st.write(f"🎯 **{r['Scelta']}** @{r['Quota']} su {r['Bookmaker']}")
-                b1, b2, b3 = st.columns(3)
-                if b1.button("VINTO ✅", key=f"v_{i}"): chiudi_gara(i, "VINTO")
-                if b2.button("PERSO ❌", key=f"p_{i}"): chiudi_gara(i, "PERSO")
-                if b3.button("ELIMINA 🗑️", key=f"e_{i}"): salva_db(df_attuale.drop(i)); st.rerun()
-    else: st.info("Nessuna giocata in corso.")
-
-# --- TAB 3: DASHBOARD FISCALE ---
-with tab3:
-    df_chiuse = df_attuale[df_attuale['Esito'].isin(["VINTO", "PERSO"])].copy()
-    if not df_chiuse.empty:
-        df_chiuse['Profitto'] = pd.to_numeric(df_chiuse['Profitto'])
-        net_profit = df_chiuse['Profitto'].sum()
-        
-        # Metriche Obiettivo Mensile
-        mancante_mese = max(0.0, OBIETTIVO_MENSILE - net_profit)
-        perc_mese = min(100, int((net_profit / OBIETTIVO_MENSILE) * 100)) if net_profit > 0 else 0
-        
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Profitto Netto", f"{round(net_profit, 2)}€")
-        m2.metric("Target 30gg", f"{round(OBIETTIVO_MENSILE, 0)}€")
-        m3.metric("Mancante", f"{round(mancante_mese, 2)}€")
-        m4.metric("Progresso Finale", f"{round((net_profit/OBIETTIVO_FINALE)*100, 1)}%")
-        
-        st.write(f"**Progresso Obiettivo Mensile (1.000€)**")
-        st.progress(perc_mese/100)
-        
-        st.markdown("### 📜 Storico Giocate")
-        for i, r in df_chiuse[::-1].iterrows():
-            icon, bg, border, txt = ("✅", "#e6ffed", "#34d058", "#155724") if r['Esito'] == "VINTO" else ("❌", "#ffeef0", "#f97583", "#721c24")
-            st.markdown(f"""
-                <div style="background-color:{bg}; border-left: 5px solid {border}; padding: 6px 12px; border-radius: 4px; margin-bottom: 4px; color:{txt}; font-size: 0.9rem;">
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <span>{icon} <b>{r['Match']}</b> ({r['Data Match']})</span>
-                        <span>{r['Scelta']} @{r['Quota']} | Res: {r.get('Risultato','-')} | <b>{r['Profitto']}€</b></span>
-                    </div>
-                </div>
-            """, unsafe_allow_html=True)
-    else: st.info("Inizia a giocare per vedere i progressi verso i 1.000€!")

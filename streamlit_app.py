@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from streamlit_gsheets import GSheetsConnection
 
 # --- 1. CONFIGURAZIONE UI ---
-st.set_page_config(page_title="AI SNIPER V15.1.24", layout="wide")
+st.set_page_config(page_title="AI SNIPER V15.1.25", layout="wide")
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 # --- 2. COSTANTI ---
@@ -32,7 +32,6 @@ if 'api_usage' not in st.session_state: st.session_state['api_usage'] = {'remain
 
 # --- 3. FUNZIONI CORE ---
 def fetch_api(endpoint, p_extra={}):
-    # Proviamo a usare le chiavi a rotazione in caso di errore
     idx = st.session_state['api_usage']['active_index']
     for attempt in range(len(API_KEYS)):
         current_idx = (idx + attempt) % len(API_KEYS)
@@ -45,8 +44,7 @@ def fetch_api(endpoint, p_extra={}):
                 st.session_state['api_usage']['remaining'] = r.headers.get('x-requests-remaining', "N/D")
                 st.session_state['api_usage']['active_index'] = current_idx
                 return r.json()
-        except:
-            continue
+        except: continue
     return None
 
 def carica_db():
@@ -69,7 +67,7 @@ def chiudi_gara(idx, esito, risultato_score="-"):
         salva_db(df); st.rerun()
 
 # --- 4. INTERFACCIA ---
-st.title("🎯 AI SNIPER V15.1.24")
+st.title("🎯 AI SNIPER V15.1.25")
 df_attuale = carica_db()
 
 with st.sidebar:
@@ -77,13 +75,9 @@ with st.sidebar:
     budget_cassa = st.number_input("Budget Attuale (€)", value=500.0)
     rischio_kelly = st.slider("Aggressività Kelly", 0.05, 0.50, 0.15)
     soglia_valore = st.slider("Min Value %", 0, 15, 0) / 100
-    
-    # --- NUOVO INDICATORE CHIAVI ---
     st.divider()
     st.info(f"💳 API Residue: **{st.session_state['api_usage']['remaining']}**")
-    chiave_num = st.session_state['api_usage']['active_index'] + 1
-    st.success(f"🔌 API Attiva: **Slot {chiave_num}**")
-    st.divider()
+    st.success(f"🔌 API Attiva: **Slot {st.session_state['api_usage']['active_index'] + 1}**")
 
 tab1, tab2, tab3 = st.tabs(["🔍 SCANNER", "💼 PORTAFOGLIO", "📊 DASHBOARD FISCALE"])
 
@@ -115,7 +109,9 @@ with tab1:
                 nome = f"{m['home_team']}-{m['away_team']}"
                 dt = datetime.strptime(m['commence_time'], "%Y-%m-%dT%H:%M:%SZ")
                 if dt > datetime.utcnow() + timedelta(hours=ore): continue
-                options = []
+                
+                # Raccogliamo TUTTE le opzioni valide per questa partita
+                match_options = []
                 for bk in m.get('bookmakers', []):
                     if bk['title'] in BK_EURO_AUTH:
                         mkt = next((x for x in bk['markets'] if x['key'] == m_key), None)
@@ -130,107 +126,29 @@ with tab1:
                                         lbl = "GOAL (GG)" if o['name'].lower() in ["yes", "both"] else "NO GOAL (NG)"
                                     elif m_key == "totals":
                                         lbl = f"{o['name'].upper()} 2.5"
-                                    options.append({"T": lbl, "Q": q, "V": val, "BK": bk['title']})
-                if options:
+                                    match_options.append({"T": lbl, "Q": q, "V": val, "BK": bk['title']})
+                
+                # --- LOGICA SINGLE SIGNAL ---
+                if match_options:
+                    # Selezioniamo SOLO la migliore opzione assoluta per questa partita
+                    best_signal = max(match_options, key=lambda x: x['V'])
                     found += 1
-                    # --- NUOVA LOGICA: RAGGRUPPAMENTO PER ESITO ---
-                    # Creiamo un dizionario per tenere solo la quota migliore per ogni esito (es. "1", "X", "2")
-                    best_by_outcome = {}
-                    for opt in options:
-                        label = opt['T']
-                        if label not in best_by_outcome or opt['Q'] > best_by_outcome[label]['Q']:
-                            best_by_outcome[label] = opt
-
-                    with st.container():
-                        st.markdown(f"#### 📅 {dt.strftime('%d/%m %H:%M')} | {nome}")
-                        
-                        # Mostriamo una riga pulita per ogni esito possibile
-                        for label in best_by_outcome:
-                            opt = best_by_outcome[label]
-                            stk = round(max(2.0, min(budget_cassa * (opt['V']/(opt['Q']-1)) * rischio_kelly, budget_cassa*0.15)), 2)
-                            
-                            c1, c2, c3, c4 = st.columns([2.5, 2, 2, 1])
-                            
-                            c1.markdown(f"🎯 **{label}**")
-                            c2.markdown(f"💰 Quota: **{opt['Q']}**")
-                            c3.markdown(f"🏛️ **{opt['BK']}** ({round(opt['V']*100,1)}%)")
-                            
-                            if (nome, label) in giocate_esistenti:
-                                c4.button("✅", key=f"ok_{nome}_{label}_{found}", disabled=True)
-                            elif c4.button("ADD", key=f"add_{nome}_{label}_{found}_{opt['BK']}"):
-                                nuova = pd.DataFrame([{
-                                    "Data Match": dt.strftime('%d/%m %H:%M'), "Match": nome, "Scelta": label, 
-                                    "Quota": opt['Q'], "Stake": stk, "Bookmaker": opt['BK'], 
-                                    "Esito": "Pendente", "Profitto": 0.0, "Sport_Key": m['sport_key'], "Risultato": "-"
-                                }])
-                                salva_db(pd.concat([df_attuale, nuova], ignore_index=True))
-                                st.rerun()
-                        st.divider()
+                    
+                    stk = round(max(2.0, min(budget_cassa * (best_signal['V']/(best_signal['Q']-1)) * rischio_kelly, budget_cassa*0.15)), 2)
+                    
+                    col1, col2, col3, col4 = st.columns([3, 1.5, 1.5, 1])
+                    col1.write(f"📅 {dt.strftime('%d/%m %H:%M')} | **{nome}**")
+                    col2.write(f"🎯 **{best_signal['T']}** @**{best_signal['Q']}**")
+                    col3.write(f"🏛️ {best_signal['BK']} ({round(best_signal['V']*100,1)}%)")
+                    
+                    if (nome, best_signal['T']) in giocate_esistenti:
+                        col4.button("✅", key=f"ok_{nome}_{found}", disabled=True)
+                    elif col4.button("ADD", key=f"add_{nome}_{found}"):
+                        nuova = pd.DataFrame([{
+                            "Data Match": dt.strftime('%d/%m %H:%M'), "Match": nome, "Scelta": best_signal['T'], 
+                            "Quota": best_signal['Q'], "Stake": stk, "Bookmaker": best_signal['BK'], 
+                            "Esito": "Pendente", "Profitto": 0.0, "Sport_Key": m['sport_key'], "Risultato": "-"
+                        }])
+                        salva_db(pd.concat([df_attuale, nuova], ignore_index=True)); st.rerun()
+                    st.divider()
             except: continue
-
-# --- TAB 2: PORTAFOGLIO ---
-with tab2:
-    df_p = df_attuale[df_attuale['Esito'] == "Pendente"].copy()
-    if not df_p.empty:
-        if st.button("🔄 AGGIORNA RISULTATI", use_container_width=True, type="primary"):
-            for idx, r in df_p.iterrows():
-                scores = fetch_api(f"https://api.the-odds-api.com/v4/sports/{r['Sport_Key']}/scores/", {"daysFrom": 1})
-                if scores:
-                    match_data = next((s for s in scores if f"{s['home_team']}-{s['away_team']}" == r['Match']), None)
-                    if match_data and match_data.get('completed'):
-                        s = match_data['scores']
-                        h_score = int(next(x['score'] for x in s if x['name'] == match_data['home_team']))
-                        a_score = int(next(x['score'] for x in s if x['name'] == match_data['away_team']))
-                        res_str = f"{h_score}-{a_score}"
-                        vittoria = False
-                        sc = r['Scelta']
-                        if sc == "GOAL (GG)": vittoria = (h_score > 0 and a_score > 0)
-                        elif sc == "NO GOAL (NG)": vittoria = (h_score == 0 or a_score == 0)
-                        elif "OVER" in sc: vittoria = (h_score + a_score > 2.5)
-                        elif "UNDER" in sc: vittoria = (h_score + a_score < 2.5)
-                        elif sc == match_data['home_team']: vittoria = (h_score > a_score)
-                        elif sc == match_data['away_team']: vittoria = (a_score > h_score)
-                        elif sc == "Draw": vittoria = (h_score == a_score)
-                        chiudi_gara(idx, "VINTO" if vittoria else "PERSO", res_str)
-            st.rerun()
-
-        for i, r in df_p.iterrows():
-            with st.expander(f"📅 {r['Data Match']} | {r['Match']} | {r['Stake']}€"):
-                st.write(f"🎯 **{r['Scelta']}** @{r['Quota']} su {r['Bookmaker']}")
-                b1, b2, b3 = st.columns(3)
-                if b1.button("VINTO ✅", key=f"v_{i}"): chiudi_gara(i, "VINTO")
-                if b2.button("PERSO ❌", key=f"p_{i}"): chiudi_gara(i, "PERSO")
-                if b3.button("ELIMINA 🗑️", key=f"e_{i}"): salva_db(df_attuale.drop(i)); st.rerun()
-    else: st.info("Nessuna giocata in corso.")
-
-# --- TAB 3: DASHBOARD FISCALE ---
-with tab3:
-    df_chiuse = df_attuale[df_attuale['Esito'].isin(["VINTO", "PERSO"])].copy()
-    if not df_chiuse.empty:
-        df_chiuse['Profitto'] = pd.to_numeric(df_chiuse['Profitto'])
-        df_chiuse['Stake'] = pd.to_numeric(df_chiuse['Stake'])
-        net_profit = df_chiuse['Profitto'].sum()
-        mancante = max(0.0, OBIETTIVO_TARGET - net_profit)
-        perc = min(100, int((net_profit / OBIETTIVO_TARGET) * 100)) if net_profit > 0 else 0
-        
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Scommesso", f"{round(df_chiuse['Stake'].sum(), 2)}€")
-        m2.metric("Profitto Netto", f"{round(net_profit, 2)}€")
-        m3.metric("Progresso", f"{perc}%")
-        m4.metric("Mancante", f"{round(mancante, 2)}€")
-        st.progress(perc/100)
-        
-        st.markdown("### 📜 Storico Giocate")
-        for i, r in df_chiuse[::-1].iterrows():
-            icon, bg, border, txt = ("✅", "#e6ffed", "#34d058", "#155724") if r['Esito'] == "VINTO" else ("❌", "#ffeef0", "#f97583", "#721c24")
-            st.markdown(f"""
-                <div style="background-color:{bg}; border-left: 5px solid {border}; padding: 6px 12px; border-radius: 4px; margin-bottom: 4px; color:{txt}; font-size: 0.9rem;">
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <span>{icon} <b>{r['Match']}</b> ({r['Data Match']})</span>
-                        <span>{r['Scelta']} @{r['Quota']} | Res: {r.get('Risultato','-')} | <b>{r['Profitto']}€</b></span>
-                    </div>
-                </div>
-            """, unsafe_allow_html=True)
-    else: st.info("Nessuna giocata chiusa.")
-    st.divider()
-    st.download_button("📥 Backup CSV", df_attuale.to_csv(index=False), "sniper_data.csv", use_container_width=True)

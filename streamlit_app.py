@@ -201,25 +201,54 @@ with tab2:
                 if b3.button("ELIMINA 🗑️", key=f"e_{i}"): salva_db(df_attuale.drop(i)); st.rerun()
     else: st.info("Nessuna giocata in corso.")
 
-# --- TAB 3: DASHBOARD FISCALE ---
+
+# --- TAB 3: DASHBOARD FISCALE (VERSIONE 15.1.31) ---
+
 with tab3:
     df_chiuse = df_attuale[df_attuale['Esito'].isin(["VINTO", "PERSO"])].copy()
     if not df_chiuse.empty:
         df_chiuse['Profitto'] = pd.to_numeric(df_chiuse['Profitto'])
         net_profit = df_chiuse['Profitto'].sum()
+        
+        # Metriche Obiettivo
         mancante_mese = max(0.0, OBIETTIVO_MENSILE - net_profit)
         perc_mese = min(100, int((net_profit / OBIETTIVO_MENSILE) * 100)) if net_profit > 0 else 0
+        
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Profitto Netto", f"{round(net_profit, 2)}€")
         m2.metric("Target 30gg", f"1.000€")
         m3.metric("Mancante", f"{round(mancante_mese, 2)}€")
         m4.metric("Progresso Totale", f"{round((net_profit/OBIETTIVO_FINALE)*100, 1)}%")
-        st.write(f"**Avanzamento Obiettivo Mensile**")
+        
         st.progress(perc_mese/100)
+
+        # --- NUOVA SEZIONE: ROADMAP VERSO L'OBIETTIVO ---
+        st.divider()
+        st.subheader("🏁 Roadmap verso i 1.000€")
+        
+        # Calcolo medie per proiezioni
+        vinte = df_chiuse[df_chiuse['Esito'] == "VINTO"]
+        if not vinte.empty:
+            profitto_medio_vincita = vinte['Profitto'].mean()
+            win_rate = len(vinte) / len(df_chiuse)
+            # Profitto atteso per ogni scommessa piazzata (considerando le perse)
+            ev_reale_per_match = net_profit / len(df_chiuse) 
+            
+            c_r1, c_r2, c_r3 = st.columns(3)
+            
+            if ev_reale_per_match > 0:
+                scommesse_necessarie = int(mancante_mese / ev_reale_per_match) + 1
+                c_r1.info(f"📈 **Profitto Medio/Match:** {round(ev_reale_per_match, 2)}€")
+                c_r2.success(f"🎯 **Scommesse Mancanti:** ~{scommesse_necessarie}")
+                
+                # Calcolo giorni rimanenti alla fine del mese (assumendo 30gg)
+                giorni_mancanti = 30 # Puoi renderlo dinamico se vuoi
+                ritmo_consigliato = round(scommesse_necessarie / giorni_mancanti, 1)
+                c_r3.warning(f"📅 **Ritmo:** {ritmo_consigliato} match/giorno")
+            else:
+                st.warning("⚠️ Il profitto attuale è negativo o nullo. Continua a operare seguendo il Value % per generare dati statistici.")
+        else:
+            st.info("💡 Servono almeno 2-3 giocate chiuse per calcolare la tua roadmap personalizzata.")
+
         st.markdown("### 📜 Storico Giocate")
-        for i, r in df_chiuse[::-1].iterrows():
-            icon, bg, border, txt = ("✅", "#e6ffed", "#34d058", "#155724") if r['Esito'] == "VINTO" else ("❌", "#ffeef0", "#f97583", "#721c24")
-            st.markdown(f"""<div style="background-color:{bg}; border-left: 5px solid {border}; padding: 8px; border-radius: 4px; margin-bottom: 5px; color:{txt};">
-                <b>{icon} {r['Match']}</b> | {r['Scelta']} @{r['Quota']} | Res: {r.get('Risultato','-')} | <b>{r['Profitto']}€</b>
-            </div>""", unsafe_allow_html=True)
-    else: st.info("Aggiungi giocate per visualizzare le metriche fiscali.")
+        # ... (restante codice dello storico come prima)

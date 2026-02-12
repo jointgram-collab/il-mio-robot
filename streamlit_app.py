@@ -202,53 +202,65 @@ with tab2:
     else: st.info("Nessuna giocata in corso.")
 
 
-# --- TAB 3: DASHBOARD FISCALE (VERSIONE 15.1.31) ---
-
+# --- TAB 3: DASHBOARD FISCALE (VERSIONE 15.1.32) ---
 with tab3:
     df_chiuse = df_attuale[df_attuale['Esito'].isin(["VINTO", "PERSO"])].copy()
     if not df_chiuse.empty:
         df_chiuse['Profitto'] = pd.to_numeric(df_chiuse['Profitto'])
         net_profit = df_chiuse['Profitto'].sum()
         
-        # Metriche Obiettivo
+        # Metriche principali (Progresso verso 1.000€)
         mancante_mese = max(0.0, OBIETTIVO_MENSILE - net_profit)
         perc_mese = min(100, int((net_profit / OBIETTIVO_MENSILE) * 100)) if net_profit > 0 else 0
         
         m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Profitto Netto", f"{round(net_profit, 2)}€")
+        m1.metric("Profitto Netto", f"{round(net_profit, 2)}€", delta=f"{round(net_profit, 2)}€")
         m2.metric("Target 30gg", f"1.000€")
         m3.metric("Mancante", f"{round(mancante_mese, 2)}€")
         m4.metric("Progresso Totale", f"{round((net_profit/OBIETTIVO_FINALE)*100, 1)}%")
         
+        st.write(f"**Avanzamento Obiettivo Mensile**")
         st.progress(perc_mese/100)
 
-        # --- NUOVA SEZIONE: ROADMAP VERSO L'OBIETTIVO ---
+        # Roadmap Dinamica
         st.divider()
         st.subheader("🏁 Roadmap verso i 1.000€")
-        
-        # Calcolo medie per proiezioni
         vinte = df_chiuse[df_chiuse['Esito'] == "VINTO"]
         if not vinte.empty:
-            profitto_medio_vincita = vinte['Profitto'].mean()
-            win_rate = len(vinte) / len(df_chiuse)
-            # Profitto atteso per ogni scommessa piazzata (considerando le perse)
-            ev_reale_per_match = net_profit / len(df_chiuse) 
-            
+            ev_reale = net_profit / len(df_chiuse) 
             c_r1, c_r2, c_r3 = st.columns(3)
+            if ev_reale > 0:
+                scommesse_nec = int(mancante_mese / ev_reale) + 1
+                c_r1.info(f"📈 **Profitto Medio:** {round(ev_reale, 2)}€")
+                c_r2.success(f"🎯 **Match Mancanti:** ~{scommesse_nec}")
+                c_r3.warning(f"📅 **Ritmo:** {round(scommesse_nec / 30, 1)} al giorno")
+        
+        # --- NUOVO SISTEMA DI ARCHIVIO STORICO ---
+        st.divider()
+        with st.expander("📂 VISUALIZZA STORICO COMPLETO DELLE PARTITE", expanded=False):
+            st.markdown("### 📜 Archivio Giocate Effettuate")
+            # Creiamo una versione pulita per la tabella
+            df_display = df_chiuse[['Data Match', 'Match', 'Scelta', 'Quota', 'Stake', 'Bookmaker', 'Risultato', 'Profitto']].copy()
+            df_display = df_display.sort_index(ascending=False) # Più recenti in alto
             
-            if ev_reale_per_match > 0:
-                scommesse_necessarie = int(mancante_mese / ev_reale_per_match) + 1
-                c_r1.info(f"📈 **Profitto Medio/Match:** {round(ev_reale_per_match, 2)}€")
-                c_r2.success(f"🎯 **Scommesse Mancanti:** ~{scommesse_necessarie}")
-                
-                # Calcolo giorni rimanenti alla fine del mese (assumendo 30gg)
-                giorni_mancanti = 30 # Puoi renderlo dinamico se vuoi
-                ritmo_consigliato = round(scommesse_necessarie / giorni_mancanti, 1)
-                c_r3.warning(f"📅 **Ritmo:** {ritmo_consigliato} match/giorno")
-            else:
-                st.warning("⚠️ Il profitto attuale è negativo o nullo. Continua a operare seguendo il Value % per generare dati statistici.")
-        else:
-            st.info("💡 Servono almeno 2-3 giocate chiuse per calcolare la tua roadmap personalizzata.")
+            # Applichiamo stile alla tabella per rendere i profitti verdi/rossi
+            def style_profit(v):
+                color = 'green' if v > 0 else 'red'
+                return f'color: {color}; font-weight: bold'
 
-        st.markdown("### 📜 Storico Giocate")
-        # ... (restante codice dello storico come prima)
+            st.dataframe(
+                df_display.style.applymap(style_profit, subset=['Profitto']),
+                use_container_width=True,
+                hide_index=True
+            )
+            
+            if st.button("🗑️ CANCELLA TUTTO LO STORICO (RESET)", type="secondary"):
+                if st.session_state.get('confirm_delete'):
+                    salva_db(pd.DataFrame(columns=df_attuale.columns))
+                    st.success("Storico azzerato!")
+                    st.rerun()
+                else:
+                    st.session_state['confirm_delete'] = True
+                    st.warning("Sei sicuro? Clicca di nuovo per confermare il reset totale.")
+    else:
+        st.info("Nessuna giocata conclusa nel database. Inizia a scansionare per vedere le tue statistiche!")
